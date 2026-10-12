@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#265b49">
+  <title>Tidy · Dinner, taken care of</title>
+  <style>
+    :root{--ink:#19372e;--muted:#596e65;--green:#265b49;--green-light:#e8f0e9;--paper:#fbfaf6;--line:#dbe2d9;--accent:#a55231;--white:#fff;--warning:#80552d;--shadow:0 12px 35px #16342709}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:default;opacity:.48}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #dc9c62;outline-offset:3px}a{color:var(--green)}[hidden]{display:none!important}
+    .shell{max-width:1080px;margin:auto;padding:24px 28px 60px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:34px}.brand{display:flex;align-items:center;gap:10px;font-size:28px;font-weight:750;letter-spacing:-1px}.logo{background:var(--green);color:white;display:grid;place-items:center;width:39px;height:39px;border-radius:13px;font-size:23px;letter-spacing:0}.badge{display:inline-flex;align-items:center;gap:7px;border-radius:99px;padding:7px 12px;background:#edece4;color:var(--muted);font-size:12px;font-weight:650}.badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#bc8c55}
+    .eyebrow{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;font-weight:750;color:var(--accent);margin:0 0 10px}h1{font-size:clamp(32px,5vw,48px);line-height:1.1;letter-spacing:-1.8px;margin:0 0 16px;max-width:740px}h2{font-size:25px;line-height:1.25;letter-spacing:-.65px;margin:0 0 10px}h3{font-size:17px;margin:0 0 6px}p{margin:0 0 15px}.intro{max-width:640px;color:var(--muted);font-size:17px}.helper{color:var(--muted);font-size:13px}.notice{background:#f0ede2;border:1px solid #e5e0d0;border-radius:13px;padding:12px 16px;margin:22px 0 26px;font-size:13px}.notice strong{font-weight:700}.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 24px}.step{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:12px;padding:12px;background:transparent;text-align:left;color:var(--muted);font-size:14px;font-weight:600}.step span{display:grid;place-items:center;border-radius:50%;background:#e9eae1;width:24px;height:24px;flex-shrink:0;font-size:12px}.step[aria-current=step]{border-color:var(--green);background:var(--green-light);color:var(--green)}.step[aria-current=step] span{color:#fff;background:var(--green)}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:22px;align-items:start}.panel,.aside{border:1px solid var(--line);border-radius:20px;background:var(--white);box-shadow:var(--shadow)}.panel{padding:28px}.aside{padding:23px;background:#f1f4ed;position:sticky;top:20px}.aside p{font-size:14px;color:var(--muted)}.aside ul{list-style:none;margin:18px 0 0;padding:0}.aside li{padding:12px 0;border-top:1px solid #dae0d3;font-size:13px}.aside li strong{display:block;margin-bottom:2px}.aside li span{color:var(--muted)}.aside .leaf{font-size:25px;color:var(--green);margin-bottom:8px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.field{margin-top:22px}.form-grid .field{margin-top:12px}.field>label,.field>legend{display:block;font-size:14px;font-weight:650;margin-bottom:7px}.field input[type=number],.field input[type=time],.field input[type=text],.field select{width:100%;border:1px solid #cbd6cd;border-radius:10px;padding:11px 12px;background:#fcfdfb;color:var(--ink);min-height:46px}.field fieldset,fieldset.field{border:0;padding:0;min-width:0}.allergies{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.check{display:flex;gap:8px;align-items:center;font-size:14px}.check input{width:18px;height:18px;accent-color:var(--green);flex-shrink:0}.allergies label{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}.allergies label:has(input:checked){background:var(--green-light);border-color:#93ad9b}.check-line{margin:12px 0}.section-rule{height:1px;background:var(--line);margin:24px 0}.actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:26px}.button{border-radius:10px;padding:12px 17px;border:1px solid var(--green);font-weight:650;font-size:14px;background:var(--green);color:#fff;min-height:45px}.button.secondary{background:transparent;color:var(--green);border-color:#c5d2c8}.button.text{background:transparent;color:var(--muted);border-color:transparent;padding-left:0}.button.small{padding:8px 12px;min-height:37px;font-size:13px}.error{color:#9c3427;border:1px solid #e4b6ae;border-radius:10px;padding:12px;background:#fff7f4;margin:16px 0;font-size:14px}.status{padding:12px 15px;border-radius:10px;background:var(--green-light);border:1px solid #c2d6c7;margin:16px 0;font-size:14px}.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin:15px 0 22px}.chip{display:inline-flex;background:#eef2eb;border-radius:99px;font-size:12px;padding:5px 10px;color:var(--green)}.meal-list{display:grid;gap:13px}.meal-card{border:1px solid var(--line);border-radius:14px;padding:17px;background:#fdfefb}.meal-header{display:flex;gap:12px;align-items:start;justify-content:space-between}.day{color:var(--accent);font-size:11px;text-transform:uppercase;font-weight:750;letter-spacing:1px;margin-bottom:3px}.meal-card h3{font-size:18px;line-height:1.3}.meal-time{font-size:12px;white-space:nowrap;background:#e9eee5;padding:5px 8px;border-radius:7px}.meal-card select{margin-top:10px;max-width:100%;width:100%;padding:8px;border:1px solid #cbd6cd;border-radius:8px;color:var(--green);background:white;font-size:13px}.meal-card details{font-size:13px;margin-top:10px;color:var(--muted)}.meal-card summary{cursor:pointer;color:var(--green)}.ingredient-list{margin:8px 0 0;padding-left:20px}.pantry-row{display:grid;grid-template-columns:minmax(0,1fr) 104px;gap:15px;align-items:center;padding:14px 0;border-bottom:1px solid #e5e9e0}.pantry-row:first-child{padding-top:0}.pantry-row label{font-size:14px;font-weight:650}.pantry-row small{display:block;color:var(--muted);font-size:12px;margin-top:2px}.pantry-row input{width:100%;border:1px solid #cbd6cd;border-radius:8px;padding:9px;font-size:14px}.input-unit{position:relative}.input-unit span{display:block;color:var(--muted);font-size:11px;text-align:right;margin-top:3px}.extra-box{background:#f3f6f0;border-radius:13px;padding:17px;margin-top:25px}.extra-box .input-line{display:flex;gap:9px}.extra-box input{flex:1;min-width:0;border:1px solid #cbd6cd;border-radius:8px;padding:9px;background:white;font-size:14px}.extra-list{margin:12px 0 0;list-style:none;padding:0;font-size:13px}.extra-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #dce4d7}.remove-item{border:0;background:none;color:#985643;font-size:12px;padding:5px}.review-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}.review-tile{border:1px solid var(--line);border-radius:11px;padding:13px}.review-tile small{display:block;color:var(--muted);font-size:11px;margin-bottom:5px}.review-tile strong{font-size:14px;display:block}.review-list{list-style:none;padding:0;margin:0}.review-list li{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #e5e9e0;font-size:14px}.review-list li span:last-child{color:var(--muted);white-space:nowrap}.approval{background:#f0f5ef;border:1px solid #c7d7c7;border-radius:15px;padding:20px;margin-top:24px}.approval h3{font-size:19px}.approval .helper{margin-bottom:0}.approval .button{width:100%;margin-top:16px}.approved-icon{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:var(--green);color:white;font-size:23px;margin-bottom:12px}.footer{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-top:25px;color:var(--muted);font-size:12px}.footer button{border:0;background:none;text-decoration:underline;font-size:12px;color:var(--muted);padding:6px}.empty{padding:20px;background:#f2f5ef;border-radius:12px;color:var(--muted);font-size:14px}.live{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:white;padding:12px 18px;border-radius:12px;font-size:14px;z-index:5;box-shadow:0 10px 30px #19372e30;max-width:90vw}.paused{padding:22px;border:1px dashed #bacab9;border-radius:14px;margin:18px 0;background:#f8faf5}.paused p{font-size:14px;color:var(--muted)}
+    .review-list li span:first-child,.extra-list li span{min-width:0;overflow-wrap:anywhere}.review-list li span:last-child,.extra-list .remove-item{flex-shrink:0}#extra-message{overflow-wrap:anywhere}
+    .meal-entry{background:#f0f5ed;border:1px solid #d4e0d1;border-radius:14px;padding:18px;margin:20px 0}.meal-entry .form-grid{grid-template-columns:125px minmax(0,1fr);gap:12px}.meal-entry .actions{margin-top:12px}.meal-choices{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.meal-entry p,.status,.meal-card h3,.ingredient-list li,.pantry-row label{overflow-wrap:anywhere}.meal-header>div{min-width:0;flex:1}.meal-time{flex-shrink:0}.custom-editor{background:#f1f5ee;border-radius:10px;padding:12px}.custom-editor textarea{width:100%;min-height:110px;resize:vertical;font-family:inherit;font-size:14px;line-height:1.5;border:1px solid #cbd6cd;border-radius:9px;padding:10px;display:block}.custom-editor .field{margin-top:14px}.custom-editor .field>label{font-size:13px}.custom-editor .check{font-size:13px;align-items:start}.custom-editor .check input{margin-top:2px}.custom-editor .button{margin-top:12px}.custom-editor .helper{margin-top:6px}.custom-editor summary{font-weight:650}.type-meal{margin-top:9px;text-align:left}.meal-input-grid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end}.meal-input-grid .field{min-width:0}.meal-input-grid input{min-width:0}.meal-input-grid .button{margin-bottom:0}
+    @media(max-width:820px){.layout{grid-template-columns:1fr}.aside{position:static}.aside ul{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.aside .leaf{display:none}.steps{gap:7px}.step{font-size:12px;padding:10px 8px;gap:6px}}
+    @media(max-width:480px){.shell{padding:20px 17px 40px}.topbar{margin-bottom:28px}.badge{font-size:10px;padding:6px 9px}.brand{font-size:25px}.logo{width:34px;height:34px}.panel{padding:21px 18px;border-radius:17px}.steps{gap:5px}.step{flex-direction:column;align-items:center;gap:5px;font-size:11px;padding:9px 3px}.form-grid{grid-template-columns:1fr;gap:5px}.intro{font-size:15px}.notice{padding:12px;font-size:12px}.review-grid{gap:8px}.review-tile{padding:11px}.actions .button{flex:1}.actions .button.text{flex:0 0 100%;text-align:left}.footer{align-items:start}.extra-box .input-line{flex-wrap:wrap}.extra-box input{flex-basis:100%}.extra-box .button{width:100%}.aside ul{grid-template-columns:1fr}.pantry-row{grid-template-columns:minmax(0,1fr) 85px}}
+    @media(max-width:480px){.meal-entry .form-grid,.meal-input-grid{grid-template-columns:1fr}.meal-entry{padding:14px}.meal-input-grid .button{width:100%}}
+    .embedded .shell{padding:12px 16px 28px;max-width:none}.embedded .topbar{display:none}.embedded .aside{position:static}.embedded .footer{flex-wrap:wrap}#save-status{margin:0 0 18px;min-height:3.1em;font-size:13px;color:var(--muted)}#save-status[data-error=true]{color:#9c3427}
+    @media(prefers-reduced-motion:no-preference){.button{transition:background .15s,transform .15s}.button:not(:disabled):hover{transform:translateY(-1px);filter:brightness(.96)}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar"><div class="brand"><span class="logo" aria-hidden="true">t</span>tidy<span style="font-size:13px;font-weight:500;letter-spacing:0;color:var(--muted);margin-left:5px">your family helper</span></div><span class="badge">Interactive demo</span></header>
+    <div id="hero"><p class="eyebrow">A little less on your mind</p>
+    <h1>Let's take dinner<br>off your mind.</h1>
+    <p class="intro">A few questions. Five weekday dinners. One grocery plan you can check and approve.</p></div>
+    <div class="notice"><strong>Meal planning demo.</strong> Example recipes and simple rules help prepare your list. No shop is connected and no orders are placed. Accounts, family syncing, AI and phone notifications are not connected.</div>
+    <p id="save-status" role="status" aria-live="polite">Checking local saving…</p>
+    <nav class="steps" aria-label="Dinner planning steps">
+      <button class="step" data-step="1" aria-current="step"><span>1</span>Your week</button>
+      <button class="step" data-step="2" disabled><span>2</span>Dinners</button>
+      <button class="step" data-step="3" disabled><span>3</span>Check kitchen</button>
+      <button class="step" data-step="4" disabled><span>4</span>Review plan</button>
+    </nav>
+    <div class="layout">
+      <main>
+        <section class="panel" id="step-1" aria-labelledby="preferences-title">
+          <h2 id="preferences-title" tabindex="-1">What would help this week?</h2>
+          <p class="helper">Start with weekday dinners. You can change any answer.</p>
+          <form id="preferences-form">
+            <div class="form-grid">
+              <div class="field"><label for="people">1. How many people are eating?</label><input id="people" type="number" min="1" max="12" step="1" required placeholder="For example, 4"><p class="helper" style="margin-top:5px">Same number and example portion each weekday. Adjust amounts for children's portions when reviewing.</p></div>
+              <div class="field"><label for="diet">2. What kinds of meals?</label><select id="diet" required><option value="">Choose a preference</option><option value="mixed">A mix, including meat and fish</option><option value="pescatarian">Vegetarian meals and fish</option><option value="vegetarian">Vegetarian</option><option value="vegan">Plant-based</option></select></div>
+            </div>
+            <fieldset class="field"><legend>3. Any food allergies to account for?</legend><label class="check check-line"><input type="checkbox" id="no-allergies">No known food allergies</label><p class="helper">Or select relevant ingredient groups below. An unanswered question isn't treated as “none”.</p><div class="allergies" id="allergy-options"></div><p class="helper" style="margin-top:10px">These example recipes use ingredient tags. Review the full recipe and product labels for allergies and other dietary needs before cooking.</p></fieldset>
+            <div class="form-grid">
+              <div class="field"><label for="max-time">4. Time available for dinner?</label><select id="max-time"><option value="20">Up to 20 minutes</option><option value="30" selected>Up to 30 minutes</option><option value="40">Up to 40 minutes</option></select><label class="check check-line"><input id="gym-nights" type="checkbox" checked>Keep Tuesday and Thursday to 20 minutes</label><p class="helper">A starting suggestion for gym evenings.</p></div>
+              <div class="field"><label for="shop">5. Preferred grocery shop?</label><select id="shop"><option value="Kibsons">Kibsons</option><option value="Carrefour">Carrefour</option><option value="Waitrose">Waitrose</option></select><p class="helper" style="margin-top:7px">Preference only. None is connected.</p><label for="budget" style="margin-top:12px">Optional grocery budget (AED)</label><input id="budget" type="number" min="0" step="1" placeholder="Leave blank if undecided"><p class="helper" style="margin-top:5px">Actual prices aren't available in this demo.</p></div>
+            </div>
+            <div class="field"><label for="checkin-day">6. When should Tidy ask about next week?</label><div class="form-grid"><select id="checkin-day" aria-label="Weekly check-in day"><option value="Sunday">Sunday</option><option value="Saturday">Saturday</option><option value="Friday">Friday</option><option value="Monday">Monday</option><option value="Off">No weekly check-in</option></select><input id="checkin-time" type="time" value="17:00" aria-label="Weekly check-in time"></div><p class="helper" style="margin-top:7px">Records a preference in the demo. A future iPhone app would need notification permission; it would not listen continuously.</p></div>
+            <p class="error" id="preferences-error" role="alert" hidden></p>
+            <div class="actions"><button type="button" class="button text" id="pause">Skip this week</button><button type="submit" class="button" id="suggest-menu">Suggest my dinners →</button></div>
+          </form>
+          <div class="paused" id="paused" hidden><h3>This week can wait.</h3><p>No menu, reminders or grocery actions have been scheduled. You can return whenever it suits you.</p><button class="button secondary" id="resume">Plan dinners now</button></div>
+        </section>
+        <section class="panel" id="step-2" aria-labelledby="menu-title" hidden>
+          <h2 id="menu-title" tabindex="-1">Five dinners, your choice.</h2><p class="helper">Simple, everyday suggestions with no beans. Text the meal you want, or choose from the examples below.</p>
+          <div class="meal-entry"><h3>What would you like to eat?</h3><form id="meal-request-form"><div class="form-grid"><div class="field"><label for="meal-day">Choose a day</label><select id="meal-day"></select></div><div class="field"><label for="meal-request">Text your meal choice</label><input id="meal-request" type="text" maxlength="120" placeholder="Monday: chicken pasta" required></div></div><p class="helper" style="margin:9px 0 0">You can type “Friday: pizza”, or choose a day and enter a meal name. New meals need your recipe details; ingredients aren't guessed.</p><div class="actions"><button type="submit" class="button small">Choose this meal</button></div></form><p id="meal-message" class="helper" role="status" style="margin:10px 0 0"></p><div id="meal-choices" class="meal-choices"></div></div>
+          <div id="menu-chips" class="chip-row"></div><div id="meal-list" class="meal-list"></div><p id="menu-status" class="status" role="status" hidden></p><p id="menu-error" class="error" role="alert" hidden></p>
+          <div class="actions"><button class="button text" data-go="1">Edit answers</button><button class="button secondary" id="new-menu">Try another menu</button><button class="button" id="approve-menu">Use this menu →</button></div>
+        </section>
+        <section class="panel" id="step-3" aria-labelledby="pantry-title" hidden>
+          <h2 id="pantry-title" tabindex="-1">What do you already have?</h2><p class="helper">Enter the usable amount in your kitchen. Leave 0 to include the full amount. Tidy doesn't know your stock automatically.</p><p class="helper">Ingredient amounts are combined across the five dinners. Retail pack sizes may differ.</p>
+          <div class="chip-row"><span class="chip" id="pantry-servings"></span><span class="chip">Only missing quantities go on the list</span></div><div id="pantry-list"></div>
+          <div class="extra-box"><h3>Anything else the household needs?</h3><p class="helper">Try “We need ketchup”. This demo handles grocery additions, not general conversation.</p><form id="extra-form" class="input-line"><input id="extra-input" type="text" maxlength="100" placeholder="We need ketchup" aria-label="An extra grocery request"><button class="button small" type="submit">Add item</button></form><p id="extra-message" class="helper" role="status" style="margin:9px 0 0"></p><ul id="extra-list" class="extra-list"></ul><p class="helper" style="margin:10px 0 0">Extras are entered by you and aren't screened for dietary needs. Use keyboard dictation on your iPhone if you prefer speaking.</p></div>
+          <div class="field"><label class="check"><input id="pantry-confirm" type="checkbox">I've checked what we have and reviewed the extras.</label></div><p class="error" id="pantry-error" role="alert" hidden></p>
+          <div class="actions"><button class="button text" data-go="2">Edit menu</button><button class="button" id="review-groceries">Prepare grocery plan →</button></div>
+        </section>
+        <section class="panel" id="step-4" aria-labelledby="review-title" hidden>
+          <h2 id="review-title" tabindex="-1">Shall I prepare these groceries?</h2><p class="helper">Review what's missing before approving the draft. The app hasn't bought anything.</p><div class="review-grid" id="review-summary"></div><ul class="review-list" id="grocery-list"></ul>
+          <div class="field"><label for="delivery">Preferred delivery day or time (optional)</label><input type="text" id="delivery" maxlength="100" placeholder="For example, Sunday afternoon"><p class="helper" style="margin-top:5px">A preference only; retailer availability hasn't been checked.</p></div>
+          <div class="approval" id="approval-request"><h3>You keep the final say.</h3><p class="helper">Approve this grocery plan to get a downloadable list. This is not permission to spend money. A real order would need verified products, prices, delivery details and your wife's approval at checkout.</p><button class="button" id="approve-draft">Approve grocery plan</button></div>
+          <div class="approval" id="approval-result" role="status" hidden><div class="approved-icon" aria-hidden="true">✓</div><h3>Grocery plan approved.</h3><p><strong>No order has been placed.</strong></p><p class="helper">You can use this list to shop. A future retailer connection could prepare a real order for a separate final review.</p><button class="button" id="download-list">Download grocery list</button><div id="meal-store-links" hidden><h3 style="margin-top:22px">Choose where to shop</h3><button type="button" class="button secondary" data-grocery-store="Carrefour">Open Carrefour</button><button type="button" class="button secondary" data-grocery-store="Waitrose">Open Waitrose</button><button type="button" class="button secondary" data-grocery-store="Kibsons">Open Kibsons</button><p class="helper" style="margin-top:10px">Website links only. Your approved list stays in Tidy; nothing is sent to a retailer basket. Some websites may block viewing inside Tidy.</p></div></div>
+          <div class="actions"><button class="button text" data-go="3">Edit kitchen amounts</button><button class="button secondary" data-go="2">Edit menu</button></div>
+        </section>
+      </main>
+      <aside class="aside" aria-label="Assistant summary"><div class="leaf" aria-hidden="true">✳</div><h3>A helper, with you in charge.</h3><p>Tidy can do the preparation. You decide what happens next.</p><ul><li><strong>Your week</strong><span id="summary-household">Waiting for your answers</span></li><li><strong>Your menu</strong><span id="summary-menu">Not chosen yet</span></li><li><strong>Your kitchen</strong><span id="summary-pantry">Not checked yet</span></li><li><strong>Your groceries</strong><span id="summary-groceries">No plan approved · no order placed</span></li><li><strong>Weekly check-in</strong><span id="summary-checkin">Choose a time that suits you</span></li></ul></aside>
+    </div>
+    <footer class="footer"><span>Saved on this browser when available · no family sync or background activity.</span><button id="reset">Start over</button></footer>
+    <div id="live-message" class="live" role="status" hidden></div>
+    <noscript><p class="error">Enable JavaScript to try this interactive demo. It never sends your answers to a server.</p></noscript>
+  </div>
+  <script>
+    'use strict';
+    const DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'];
+    const ALLERGENS=[['dairy','Milk / dairy'],['egg','Eggs'],['fish','Fish'],['shellfish','Shellfish'],['nuts','Tree nuts'],['peanut','Peanuts'],['sesame','Sesame'],['soy','Soy'],['wheat','Wheat / gluten']];
+    const INGREDIENTS={
+      chicken:{name:'Chicken breast',unit:'g'},rice:{name:'Dry rice',unit:'g'},oliveOil:{name:'Olive oil',unit:'ml'},broccoli:{name:'Broccoli',unit:'g'},pasta:{name:'Dry wheat pasta',unit:'g'},tomatoes:{name:'Tomatoes',unit:'g'},salmon:{name:'Salmon',unit:'g'},whiteFish:{name:'White fish',unit:'g'},carrots:{name:'Carrots',unit:'g'},tuna:{name:'Tinned tuna, drained',unit:'g'},potatoes:{name:'Potatoes',unit:'g'},courgette:{name:'Courgette',unit:'g'},eggs:{name:'Eggs',unit:'pieces'},corn:{name:'Sweetcorn',unit:'g'}
+    };
+    // Amounts are per person for an illustrative recipe set, not retailer pack sizes.
+    const RECIPES=[
+      {id:'chicken-rice',name:'Chicken and rice',time:25,diet:'meat',allergens:[],ingredients:{chicken:180,rice:75,carrots:100,oliveOil:10}},
+      {id:'chicken-pasta',name:'Chicken pasta',time:20,diet:'meat',allergens:['wheat'],ingredients:{chicken:150,pasta:90,tomatoes:150,oliveOil:10}},
+      {id:'fish-tray',name:'Fish and potatoes',time:30,diet:'fish',allergens:['fish'],ingredients:{whiteFish:160,potatoes:200,carrots:100,oliveOil:10}},
+      {id:'frittata',name:'Omelette and potatoes',time:20,diet:'vegetarian',allergens:['egg'],ingredients:{eggs:2,potatoes:150,oliveOil:10}},
+      {id:'tomato-pasta',name:'Tomato pasta',time:20,diet:'vegan',allergens:['wheat'],ingredients:{pasta:90,tomatoes:150,oliveOil:10}},
+      {id:'salmon-rice',name:'Salmon and rice',time:25,diet:'fish',allergens:['fish'],ingredients:{salmon:160,rice:75,broccoli:120,oliveOil:10}},
+      {id:'tuna-pasta',name:'Tuna pasta',time:20,diet:'fish',allergens:['fish','wheat'],ingredients:{tuna:120,pasta:90,tomatoes:150,oliveOil:10}},
+      {id:'chicken-tray',name:'Chicken and potatoes',time:30,diet:'meat',allergens:[],ingredients:{chicken:180,potatoes:200,carrots:100,oliveOil:10}},
+      {id:'vegetable-rice',name:'Vegetable rice',time:20,diet:'vegan',allergens:[],ingredients:{rice:75,broccoli:100,carrots:100,oliveOil:10}},
+      {id:'vegetable-pasta',name:'Vegetable pasta',time:20,diet:'vegan',allergens:['wheat'],ingredients:{pasta:90,courgette:100,tomatoes:100,oliveOil:10}},
+      {id:'tomato-rice',name:'Tomato rice',time:20,diet:'vegan',allergens:[],ingredients:{rice:75,tomatoes:150,oliveOil:10}},
+      {id:'vegetable-soup',name:'Vegetable soup',time:20,diet:'vegan',allergens:[],ingredients:{potatoes:150,carrots:100,courgette:100,oliveOil:10}},
+      {id:'carrot-rice',name:'Rice and carrots',time:20,diet:'vegan',allergens:[],ingredients:{rice:75,carrots:150,oliveOil:10}},
+      {id:'potato-courgette',name:'Potatoes and courgette',time:20,diet:'vegan',allergens:[],ingredients:{potatoes:200,courgette:120,oliveOil:10}},
+      {id:'corn-rice',name:'Rice and sweetcorn',time:20,diet:'vegan',allergens:[],ingredients:{rice:75,corn:100,oliveOil:10}}
+    ];
+    const RECIPE_ALIASES={
+      'chicken-rice':['chicken rice'], 'chicken-tray':['chicken traybake','chicken potatoes'],
+      'chicken-pasta':['chicken pasta'], 'salmon-rice':['salmon rice','salmon rice bowls'],
+      'fish-tray':['fish potatoes','baked fish'], 'tuna-pasta':['tuna pasta'],
+      'frittata':['omelette','omelet','frittata'], 'tomato-pasta':['tomato pasta'],
+      'vegetable-rice':['vegetable rice','veg rice'], 'vegetable-pasta':['vegetable pasta','veg pasta'],
+      'tomato-rice':['tomato rice'], 'vegetable-soup':['vegetable soup','veg soup'],
+      'carrot-rice':['carrot rice'], 'potato-courgette':['potatoes courgette'], 'corn-rice':['corn rice']
+    };
+    const state={step:1,prefs:null,menu:[],menuApproved:false,pantry:{},pantryReviewed:false,draftApproved:false,extras:[],delivery:'',paused:false,version:0};
+    let customIngredientNumber=0;
+    const $=id=>document.getElementById(id);
+    function el(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
+    function setMessage(id,message){const box=$(id);box.textContent=message;box.hidden=!message;}
+    let liveTimer;
+    function toast(message){$('live-message').textContent=message;$('live-message').hidden=false;clearTimeout(liveTimer);liveTimer=setTimeout(()=>{$('live-message').hidden=true;},4500);}
+    function recipe(id){return RECIPES.find(r=>r.id===id);}
+    function mealRecipe(meal){return meal.custom||recipe(meal.id);}
+    function cookingLimit(day){return state.prefs.gymNights&&(day==='Tuesday'||day==='Thursday')?Math.min(state.prefs.maxTime,20):state.prefs.maxTime;}
+    function normalMealName(text){return text.normalize('NFKC').toLocaleLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(w=>w&&w!=='and'&&w!=='with').join(' ');}
+    function parseMealRequest(raw,selectedDay){
+      const days=raw.match(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday)\b/gi)||[];
+      const distinct=[...new Set(days.map(x=>x.toLocaleLowerCase()))];
+      if(distinct.length>1)throw Error('Please choose one weekday at a time. For example, “Monday: chicken pasta”.');
+      const day=distinct.length?DAYS.find(x=>x.toLocaleLowerCase()===distinct[0]):selectedDay;
+      let name=raw.trim();
+      const prefix=/^(?:i(?:['’]d| would) like|i want|we(?:['’]d| would) like|we want|let['’]s have|can we have|please choose|please|have)\s+/i;
+      name=name.replace(prefix,'').replace(/\s+for dinner[.!?]*$/i,'');
+      name=name.replace(new RegExp('^(?:on\\s+|for\\s+)?'+day+'\\b\\s*[:,-]?\\s*','i'),'');
+      name=name.replace(new RegExp('\\s+(?:(?:on|for)\\s+)?'+day+'[.!?]*$','i'),'');
+      name=name.replace(prefix,'').replace(/\s+for dinner[.!?]*$/i,'').replace(/[.!?]+$/,'').trim();
+      if(!name||name.length>100)throw Error('Enter a meal name of 1–100 characters.');
+      if(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday)\b/i.test(name))throw Error('Use a day at the beginning or end, such as “Monday: chicken pasta”.');
+      return {day,name};
+    }
+    function matchingRecipes(name){
+      const normal=normalMealName(name);if(!normal)return [];
+      const exact=RECIPES.filter(r=>[r.name,r.id,...(RECIPE_ALIASES[r.id]||[])].some(alias=>normalMealName(alias)===normal));
+      if(exact.length)return exact;
+      const words=normal.split(' ');
+      return RECIPES.filter(r=>[r.name,...(RECIPE_ALIASES[r.id]||[])].some(alias=>{const candidate=normalMealName(alias).split(' ');return words.every(w=>candidate.includes(w));}));
+    }
+    function chooseKnownMeal(day,r){
+      if(!allowedRecipes(day).some(candidate=>candidate.id===r.id)){$('meal-message').textContent='That meal no longer fits your selected food or cooking-time choices. Please choose again.';$('meal-choices').replaceChildren();return;}
+      const meal=state.menu.find(m=>m.day===day);meal.id=r.id;delete meal.custom;invalidate('menu');
+      setMessage('menu-error','');setMessage('menu-status',`${day} is now ${r.name}. Review and approve your updated menu.`);
+      $('meal-message').textContent=`Chosen for ${day}: ${r.name}. Using its example ingredients.`;$('meal-choices').replaceChildren();$('meal-request').value='';$('meal-day').value=day;renderMenu();
+    }
+    function chooseTypedMeal(raw,selectedDay){
+      const {day,name}=parseMealRequest(raw,selectedDay),matches=matchingRecipes(name),allowed=allowedRecipes(day);
+      const fitting=matches.filter(r=>allowed.some(x=>x.id===r.id));$('meal-choices').replaceChildren();
+      if(matches.length&&!fitting.length)throw Error('The matching example meals do not fit your chosen diet, allergy tags or cooking-time limit. Choose another meal or edit your answers.');
+      if(matches.length===1){chooseKnownMeal(day,fitting[0]);return;}
+      if(matches.length>1){
+        $('meal-message').textContent=`Which meal would you like for ${day}? These choices fit your selected food and time preferences.`;
+        for(const r of fitting){const button=el('button',r.name,'button secondary small');button.type='button';button.addEventListener('click',()=>chooseKnownMeal(day,r));$('meal-choices').append(button);}return;
+      }
+      const meal=state.menu.find(m=>m.day===day);
+      if(!(meal.custom&&meal.custom.name===name))meal.custom={name,time:null,ingredients:{},timeDraft:'',ingredientText:'',foodConfirmed:false,noGroceries:false,saved:false};
+      meal.id=null;invalidate('menu');setMessage('menu-error','');setMessage('menu-status',`${day}: ${name} is your custom meal. Add its details before approving the menu.`);
+      $('meal-message').textContent=`Chosen for ${day}: ${name}. This is a draft; its ingredients and time need your input.`;$('meal-request').value='';$('meal-day').value=day;renderMenu();
+      const editor=document.querySelector(`.meal-card[data-day="${day}"] .custom-editor`);if(editor)editor.scrollIntoView({block:'start',behavior:'instant'});
+    }
+    function normalIngredientName(name){return name.normalize('NFKC').toLocaleLowerCase().trim().replace(/\s+/g,' ');}
+    function parseCustomIngredients(text){
+      const lines=text.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+      if(!lines.length)throw Error('Add ingredients with amounts per person, or explicitly choose “No groceries needed”.');
+      if(lines.length>30)throw Error('Use at most 30 ingredient lines for this demo.');
+      const units={g:['g',1],kg:['g',1000],ml:['ml',1],l:['ml',1000],pieces:['pieces',1]};
+      const parsed=lines.map((line,index)=>{
+        const fields=line.split('|').map(x=>x.trim());
+        if(fields.length!==3)throw Error(`Ingredient line ${index+1}: use Name | amount per person | unit. For example, Dry rice | 75 | g.`);
+        const [name,rawAmount,rawUnit]=fields,amount=Number(rawAmount),unit=Object.hasOwn(units,rawUnit.toLocaleLowerCase())?units[rawUnit.toLocaleLowerCase()]:null;
+        if(!name||name.length>80||!rawAmount||!Number.isFinite(amount)||amount<=0||amount>1000000||!unit)throw Error(`Ingredient line ${index+1}: enter a name, a positive amount and one of g, kg, ml, l or pieces.`);
+        if(unit[0]==='pieces'&&!Number.isInteger(amount))throw Error(`Ingredient line ${index+1}: pieces must be a whole number.`);
+        return {name,unit:unit[0],amount:amount*unit[1]};
+      });
+      const ingredients={};
+      for(const item of parsed){
+        let key=Object.keys(INGREDIENTS).find(k=>normalIngredientName(INGREDIENTS[k].name)===normalIngredientName(item.name)&&INGREDIENTS[k].unit===item.unit);
+        if(!key){key='customIngredient-'+(++customIngredientNumber);INGREDIENTS[key]={name:item.name,unit:item.unit};}
+        ingredients[key]=(ingredients[key]||0)+item.amount;
+      }
+      return ingredients;
+    }
+    function quantity(n,unit){return `${Math.round(n*100)/100} ${unit}`;}
+    function dietName(diet){return {mixed:'Mixed meals',pescatarian:'Vegetarian & fish',vegetarian:'Vegetarian',vegan:'Plant-based'}[diet];}
+    function allowedRecipes(day){
+      const p=state.prefs;if(!p)return [];
+      const limit=p.gymNights&&(day==='Tuesday'||day==='Thursday')?Math.min(p.maxTime,20):p.maxTime;
+      return RECIPES.filter(r=>r.time<=limit&&!r.allergens.some(a=>p.allergies.includes(a))&&(p.diet==='mixed'||(p.diet==='pescatarian'&&r.diet!=='meat')||(p.diet==='vegetarian'&&['vegetarian','vegan'].includes(r.diet))||(p.diet==='vegan'&&r.diet==='vegan')));
+    }
+    function readPreferences(){
+      const people=$('people').valueAsNumber,diet=$('diet').value;
+      if(!Number.isInteger(people)||people<1||people>12)throw Error('Please tell me how many people are eating (1–12).');
+      if(!diet)throw Error('Please choose the kinds of meals you want.');
+      const allergies=[...document.querySelectorAll('#allergy-options input:checked')].map(i=>i.value);
+      if(!$('no-allergies').checked&&allergies.length===0)throw Error('Please answer the allergy question: select relevant groups or “No known food allergies”.');
+      const rawBudget=$('budget').value.trim(),budget=rawBudget===''?null:Number(rawBudget);
+      if(budget!==null&&(!Number.isFinite(budget)||budget<0))throw Error('The grocery budget must be a positive amount or 0, or left blank.');
+      if($('checkin-day').value!=='Off'&&!$('checkin-time').value)throw Error('Choose a check-in time, or choose no weekly check-in.');
+      return {people,diet,allergies,maxTime:Number($('max-time').value),gymNights:$('gym-nights').checked,shop:$('shop').value,budget,checkinDay:$('checkin-day').value,checkinTime:$('checkin-time').value};
+    }
+    function aggregateIngredients(){
+      const total={};if(!state.prefs)return total;
+      for(const meal of state.menu)for(const [key,amount] of Object.entries(mealRecipe(meal).ingredients))total[key]=(total[key]||0)+amount*state.prefs.people;
+      return total;
+    }
+    function shortageList(){
+      const total=aggregateIngredients();
+      const list=Object.keys(total).sort((a,b)=>INGREDIENTS[a].name.localeCompare(INGREDIENTS[b].name)).map(key=>({key,name:INGREDIENTS[key].name,unit:INGREDIENTS[key].unit,amount:Math.max(0,total[key]-(state.pantry[key]||0))})).filter(item=>item.amount>0);
+      return list.concat(state.extras.map(x=>({key:x.key,name:x.name,unit:'item',amount:1,extra:true})));
+    }
+    function invalidate(level){
+      if(level==='menu')state.menuApproved=false;
+      if(level==='menu'||level==='pantry'){state.pantryReviewed=false;$('pantry-confirm').checked=false;}
+      state.draftApproved=false;
+      updateSummary();updateSteps();
+    }
+    function updateSummary(){
+      $('summary-household').textContent=state.prefs?`${state.prefs.people} people · ${dietName(state.prefs.diet)}`:'Waiting for your answers';
+      $('summary-menu').textContent=state.menu.length?(state.menuApproved?'Five dinners approved':'Five dinners awaiting approval'):'Not chosen yet';
+      $('summary-pantry').textContent=state.pantryReviewed?'Kitchen amounts checked':'Not checked yet';
+      $('summary-groceries').textContent=state.draftApproved?'Plan approved · no order placed':'No plan approved · no order placed';
+      $('summary-checkin').textContent=state.prefs?(state.prefs.checkinDay==='Off'?'Turned off':`${state.prefs.checkinDay}, ${state.prefs.checkinTime} · preference only`):'Choose a time that suits you';
+    }
+    function updateSteps(){
+      for(const button of document.querySelectorAll('.step')){
+        const n=Number(button.dataset.step);button.disabled=state.paused||(n===2&&!state.menu.length)||(n===3&&!state.menuApproved)||(n===4&&(!state.menuApproved||!state.pantryReviewed));
+        if(n===state.step)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
+      }
+    }
+    function go(step,focus=true){
+      if(state.paused)return;
+      if(step===2&&!state.menu.length)return;
+      if(step===3&&!state.menuApproved)return;
+      if(step===4&&(!state.menuApproved||!state.pantryReviewed))return;
+      state.step=step;$('hero').hidden=step!==1;
+      if(step===2)renderMenu();if(step===3)renderPantry();if(step===4)renderReview();
+      for(let n=1;n<=4;n++)$('step-'+n).hidden=n!==step;
+      updateSteps();updateSummary();
+      if(focus){const heading=$('step-'+step).querySelector('h2');heading.focus();heading.scrollIntoView({block:'start',behavior:'instant'});}
+    }
+    function generateMenu(){
+      const chosen=[];state.version++;
+      for(const day of DAYS){
+        const options=allowedRecipes(day).filter(r=>!chosen.some(m=>m.id===r.id));
+        if(!options.length)throw Error('The example recipe set cannot make five different dinners with these choices. Please adjust the cooking-time preference; keep dietary restrictions that matter to you.');
+        const option=options[(state.version-1)%options.length];chosen.push({day,id:option.id});
+      }
+      state.menu=chosen;invalidate('menu');$('meal-choices').replaceChildren();$('meal-message').textContent='';
+    }
+    function customMealEditor(meal,card){
+      const custom=meal.custom,details=el('details',undefined,'custom-editor');details.open=!custom.saved;
+      details.append(el('summary',custom.saved?'Edit your recipe details':'Add details for your meal'));
+      const form=el('form'),timeField=el('div',undefined,'field'),timeLabel=el('label','Your cooking-time estimate (minutes)'),timeInput=el('input');
+      timeInput.id='custom-time-'+meal.day;timeInput.type='number';timeInput.min='0';timeInput.max=String(cookingLimit(meal.day));timeInput.step='1';timeInput.required=true;timeInput.value=custom.timeDraft;timeLabel.htmlFor=timeInput.id;
+      timeField.append(timeLabel,timeInput,el('p',`Your selected limit for ${meal.day} is ${cookingLimit(meal.day)} minutes. Edit your answers to change it.`,'helper'));form.append(timeField);
+      const ingredientField=el('div',undefined,'field'),ingredientLabel=el('label','Ingredients PER PERSON — one per line'),textarea=el('textarea');
+      textarea.id='custom-ingredients-'+meal.day;textarea.maxLength=5000;textarea.value=custom.ingredientText;textarea.placeholder='Dry rice | 75 | g\nChicken breast | 180 | g\nOlive oil | 10 | ml';ingredientLabel.htmlFor=textarea.id;
+      textarea.required=!custom.noGroceries;textarea.disabled=custom.noGroceries;
+      ingredientField.append(ingredientLabel,textarea,el('p',`Use Name | amount | unit. Units: g, kg, ml, l or pieces. Tidy multiplies each amount by ${state.prefs.people} people. Enter per-person amounts, not the family's total.`,'helper'));form.append(ingredientField);
+      const noneLabel=el('label',undefined,'check check-line'),none=el('input');none.type='checkbox';none.checked=custom.noGroceries;none.id='custom-no-groceries-'+meal.day;noneLabel.append(none,el('span','No groceries needed for this meal (for example, leftovers).'));form.append(noneLabel);
+      const foodLabel=el('label',undefined,'check check-line'),food=el('input');food.type='checkbox';food.checked=custom.foodConfirmed;food.id='custom-food-'+meal.day;foodLabel.append(food,el('span','I have checked this meal and its full ingredients against our diet and allergies.'));form.append(foodLabel);
+      form.append(el('p','Custom meals are reviewed by you. The demo does not infer ingredients or certify their suitability.','helper'));
+      const message=el('p',undefined,'error');message.hidden=true;message.setAttribute('role','alert');const save=el('button','Save meal details','button small');save.type='submit';form.append(message,save);
+      const dirty=recheckFood=>{
+        custom.saved=false;if(recheckFood){custom.foodConfirmed=false;food.checked=false;}invalidate('menu');
+        card.querySelector('.meal-time').textContent='Needs review';message.hidden=true;
+        details.querySelector('summary').textContent='Recipe details need review';
+        setMessage('menu-status','Your recipe changed. Save its details and approve the updated menu before preparing groceries.');
+      };
+      timeInput.addEventListener('input',()=>{custom.timeDraft=timeInput.value;dirty(false);});
+      textarea.addEventListener('input',()=>{custom.ingredientText=textarea.value;dirty(true);});
+      none.addEventListener('change',()=>{custom.noGroceries=none.checked;textarea.disabled=none.checked;textarea.required=!none.checked;dirty(true);});
+      food.addEventListener('change',()=>{custom.foodConfirmed=food.checked;dirty(false);});
+      form.addEventListener('submit',event=>{
+        event.preventDefault();message.hidden=true;
+        try{
+          const time=Number(custom.timeDraft);
+          if(custom.timeDraft===''||!Number.isInteger(time)||time<0||time>cookingLimit(meal.day))throw Error(`Enter a cooking estimate from 0 to ${cookingLimit(meal.day)} minutes, or edit your answers to change the limit.`);
+          if(!custom.foodConfirmed)throw Error('Please check this meal against your food requirements and tick the confirmation.');
+          const ingredients=custom.noGroceries?{}:parseCustomIngredients(custom.ingredientText);
+          custom.time=time;custom.ingredients=ingredients;custom.saved=true;invalidate('menu');setMessage('menu-error','');
+          setMessage('menu-status',`${meal.day}: recipe details saved. Review and approve the updated menu.`);renderMenu();
+        }catch(error){message.textContent=error.message;message.hidden=false;}
+      });
+      details.append(form);return details;
+    }
+    function renderMenu(){
+      const chips=$('menu-chips');chips.replaceChildren();
+      for(const text of [`${state.prefs.people} people`,dietName(state.prefs.diet),state.prefs.allergies.length?'Example recipes exclude selected allergy tags':'No known allergies reported',state.prefs.gymNights?'Short dinners Tue & Thu':'Your chosen cooking limit'])chips.append(el('span',text,'chip'));
+      if(state.menu.some(m=>m.custom))chips.append(el('span','Custom meals need your food review','chip'));
+      const list=$('meal-list');list.replaceChildren();
+      for(const meal of state.menu){
+        const r=mealRecipe(meal),card=el('article',undefined,'meal-card');card.dataset.day=meal.day;
+        const header=el('div',undefined,'meal-header'),title=el('div');title.append(el('div',meal.day,'day'),el('h3',r.name));header.append(title,el('span',meal.custom&&!meal.custom.saved?'Needs review':`~${r.time} min`,'meal-time'));card.append(header);
+        const select=el('select');select.setAttribute('aria-label',`Dinner for ${meal.day}`);
+        if(meal.custom){const option=el('option',`Your meal: ${r.name}`);option.value='custom';option.selected=true;select.append(option);}
+        const occupied=state.menu.filter(x=>x.day!==meal.day).map(x=>x.id);
+        for(const candidate of allowedRecipes(meal.day).filter(x=>x.id===meal.id||!occupied.includes(x.id))){const option=el('option',candidate.name);option.value=candidate.id;option.selected=!meal.custom&&candidate.id===meal.id;select.append(option);}
+        select.addEventListener('change',()=>{if(select.value==='custom')return;meal.id=select.value;delete meal.custom;invalidate('menu');setMessage('menu-error','');setMessage('menu-status','Dinner changed. Please approve the updated menu and check your kitchen again.');renderMenu();});card.append(select);
+        const typeButton=el('button',`Text a meal for ${meal.day}`,'button text small type-meal');typeButton.type='button';typeButton.addEventListener('click',()=>{$('meal-day').value=meal.day;$('meal-request').value='';$('meal-message').textContent='';$('meal-choices').replaceChildren();$('meal-request').focus();$('meal-request-form').scrollIntoView({block:'center',behavior:'instant'});});card.append(typeButton);
+        if(meal.custom){card.append(customMealEditor(meal,card));if(!meal.custom.saved){list.append(card);continue;}}
+        const details=el('details'),summary=el('summary',`Example ingredients for ${state.prefs.people} people`),ingredients=el('ul',undefined,'ingredient-list');
+        if(meal.custom){summary.textContent=`Your ingredients for ${state.prefs.people} people`;if(!Object.keys(r.ingredients).length)ingredients.append(el('li','No groceries needed, as confirmed by you.'));}
+        for(const [key,amount] of Object.entries(r.ingredients))ingredients.append(el('li',`${INGREDIENTS[key].name} · ${quantity(amount*state.prefs.people,INGREDIENTS[key].unit)}`));
+        details.append(summary,ingredients,el('p',meal.custom?'Your entered amounts, scaled for the household.':'Example ingredients, not complete cooking instructions.','helper'));card.append(details);list.append(card);
+      }
+      $('approve-menu').textContent=state.menuApproved?'Review kitchen →':'Use this menu →';
+    }
+    function renderExtras(){
+      $('extra-list').replaceChildren();
+      for(const item of state.extras){const li=el('li'),remove=el('button','Remove','remove-item');remove.type='button';remove.setAttribute('aria-label',`Remove ${item.name}`);remove.addEventListener('click',()=>{state.extras=state.extras.filter(x=>x.key!==item.key);invalidate('pantry');renderExtras();toast('Item removed. Review your grocery plan again.');});li.append(el('span',item.name),remove);$('extra-list').append(li);}
+    }
+    function renderPantry(){
+      const list=$('pantry-list');list.replaceChildren();const totals=aggregateIngredients();$('pantry-servings').textContent=`${state.prefs.people} people × 5 dinners`;
+      for(const key of Object.keys(mealStockDrafts))if(!Object.hasOwn(totals,key))delete mealStockDrafts[key];
+      for(const key of Object.keys(state.pantry))if(!Object.hasOwn(totals,key))delete state.pantry[key];
+      for(const key of Object.keys(totals).sort((a,b)=>INGREDIENTS[a].name.localeCompare(INGREDIENTS[b].name))){
+        const item=INGREDIENTS[key],row=el('div',undefined,'pantry-row'),text=el('div'),label=el('label',item.name);label.htmlFor='stock-'+key;text.append(label,el('small',`Needed: ${quantity(totals[key],item.unit)}`));
+        const field=el('div',undefined,'input-unit'),input=el('input');input.id='stock-'+key;input.type='number';input.min='0';input.step=item.unit==='pieces'?'1':'any';input.value=Object.hasOwn(mealStockDrafts,key)?mealStockDrafts[key]:(state.pantry[key]||0);input.setAttribute('aria-label',`${item.name} already at home, in ${item.unit}`);
+        input.addEventListener('input',()=>{mealStockDrafts[key]=input.value;const amount=input.valueAsNumber;if(Number.isFinite(amount)&&amount>=0)state.pantry[key]=amount;else delete state.pantry[key];invalidate('pantry');});field.append(input,el('span',item.unit));row.append(text,field);list.append(row);
+      }
+      $('pantry-confirm').checked=state.pantryReviewed;renderExtras();setMessage('pantry-error','');
+    }
+    function renderReview(){
+      const grid=$('review-summary');grid.replaceChildren();
+      const tiles=[['Preferred shop',`${state.prefs.shop} · not connected`],['Price total','Unavailable · no live prices'],['Your budget',state.prefs.budget===null?'Not specified':`AED ${state.prefs.budget} · not price-checked`],['Substitutions','Require a separate review']];
+      for(const [label,value] of tiles){const tile=el('div',undefined,'review-tile');tile.append(el('small',label),el('strong',value));grid.append(tile);}
+      const list=$('grocery-list');list.replaceChildren();const missing=shortageList();
+      if(!missing.length)list.append(el('li','No ingredients are missing from your reviewed menu.','empty'));
+      for(const item of missing){const li=el('li');li.append(el('span',item.name),el('span',item.extra?'1 item · check quantity':quantity(item.amount,item.unit)));list.append(li);}
+      $('delivery').value=state.delivery;$('approval-request').hidden=state.draftApproved;$('approval-result').hidden=!state.draftApproved;
+    }
+    function groceryText(){
+      const p=state.prefs,lines=['TIDY — APPROVED GROCERY PLAN','No order has been placed.','',`People per dinner: ${p.people}`,`Preferred shop: ${p.shop} (not connected)`,`Budget: ${p.budget===null?'not specified':'AED '+p.budget} — actual prices not checked`,`Delivery preference: ${state.delivery||'not specified'} — availability not checked`,'','WEEKDAY DINNERS',...state.menu.map(m=>`${m.day}: ${mealRecipe(m).name}${m.custom?' (custom recipe reviewed by you)':''}`),'','GROCERIES TO BUY',...shortageList().map(i=>`${i.name}: ${i.extra?'1 item — confirm quantity':quantity(i.amount,i.unit)}`),'','Amounts are ingredients, not retailer packs. Review recipes and product labels for dietary needs.','Custom meal ingredients come from your entries, not generated recipes.','Purchasing requires a separate review and explicit approval.'];
+      return lines.join('\n');
+    }
+    for(const [value,label] of ALLERGENS){const wrapper=el('label',undefined,'check'),input=el('input');input.type='checkbox';input.value=value;input.id='allergy-'+value;input.addEventListener('change',()=>{if(input.checked)$('no-allergies').checked=false;});wrapper.append(input,el('span',label));$('allergy-options').append(wrapper);}
+    $('no-allergies').addEventListener('change',()=>{if($('no-allergies').checked)for(const input of document.querySelectorAll('#allergy-options input'))input.checked=false;});
+    $('preferences-form').addEventListener('input',()=>{if(state.menu.length){invalidate('menu');state.menu=[];state.prefs=null;updateSteps();updateSummary();}});
+    $('preferences-form').addEventListener('submit',event=>{
+      event.preventDefault();setMessage('preferences-error','');
+      try{state.prefs=readPreferences();generateMenu();setMessage('menu-status','');go(2);}catch(error){state.prefs=null;state.menu=[];invalidate('menu');setMessage('preferences-error',error.message);}
+    });
+    $('new-menu').addEventListener('click',()=>{try{generateMenu();setMessage('menu-status','New suggestions are ready. Your grocery approval has been reset.');renderMenu();}catch(error){setMessage('menu-error',error.message);}});
+    $('meal-request-form').addEventListener('submit',event=>{event.preventDefault();try{chooseTypedMeal($('meal-request').value,$('meal-day').value);}catch(error){$('meal-message').textContent=error.message;$('meal-choices').replaceChildren();}});
+    for(const input of [$('meal-request'),$('meal-day')])input.addEventListener('input',()=>{$('meal-message').textContent='';$('meal-choices').replaceChildren();});
+    for(const day of DAYS){const option=el('option',day);option.value=day;$('meal-day').append(option);}
+    $('approve-menu').addEventListener('click',()=>{
+      const pending=state.menu.find(m=>m.custom&&(!m.custom.saved||!m.custom.foodConfirmed));
+      if(pending){setMessage('menu-error',`Add and save the recipe details for ${pending.day} before approving the menu.`);const editor=document.querySelector(`.meal-card[data-day="${pending.day}"] .custom-editor`);editor.open=true;editor.scrollIntoView({block:'start',behavior:'instant'});return;}
+      state.menuApproved=true;updateSummary();go(3);
+    });
+    $('pantry-confirm').addEventListener('change',()=>{if(!state.pantryReviewed)return;invalidate('pantry');});
+    $('review-groceries').addEventListener('click',()=>{
+      for(const input of document.querySelectorAll('#pantry-list input'))if(!input.checkValidity()||!Number.isFinite(input.valueAsNumber)){setMessage('pantry-error','Please enter valid, non-negative kitchen quantities for every ingredient.');input.focus();return;}
+      if(!$('pantry-confirm').checked){setMessage('pantry-error','Please check your kitchen amounts and extras, then tick the confirmation.');return;}
+      state.pantryReviewed=true;go(4);
+    });
+    $('extra-form').addEventListener('submit',event=>{
+      event.preventDefault();let name=$('extra-input').value.trim().replace(/^(?:we\s+(?:also\s+)?need|i\s+need|add|please\s+add)\s+/i,'').replace(/\s+to\s+(?:the\s+)?(?:shopping\s+)?list[.!]?$/i,'').replace(/[.!]+$/,'').trim();
+      if(!name){$('extra-message').textContent='Tell me which grocery item to add.';return;}
+      if(/^(?:book|order|pay|remind|call|cancel|send)\b/i.test(name)){$('extra-message').textContent='This demo only adds grocery items here. No booking, reminder, message or order was created.';return;}
+      const key=name.toLocaleLowerCase();if(state.extras.some(x=>x.key===key)){$('extra-message').textContent=`${name} is already on your extra list.`;return;}
+      if(state.extras.length>=200){$('extra-message').textContent='This demo can save up to 200 extra grocery items. Remove an item before adding another.';return;}
+      state.extras.push({key,name});invalidate('pantry');renderExtras();$('extra-input').value='';$('extra-message').textContent=`Added ${name}. Check the amount you need when shopping.`;
+    });
+    $('delivery').addEventListener('input',()=>{state.delivery=$('delivery').value;invalidate('draft');$('approval-request').hidden=false;$('approval-result').hidden=true;});
+    $('approve-draft').addEventListener('click',()=>{if(!state.menuApproved||!state.pantryReviewed)return;state.draftApproved=true;updateSummary();renderReview();toast('Grocery plan approved. No order has been placed.');});
+    $('download-list').addEventListener('click',()=>{if(!state.draftApproved)return;const url=URL.createObjectURL(new Blob([groceryText()],{type:'text/plain;charset=utf-8'})),a=el('a');a.href=url;a.download='Tidy-groceries.txt';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+    for(const button of document.querySelectorAll('.step'))button.addEventListener('click',()=>go(Number(button.dataset.step)));
+    for(const button of document.querySelectorAll('[data-go]'))button.addEventListener('click',()=>go(Number(button.dataset.go)));
+    $('pause').addEventListener('click',()=>{state.paused=true;invalidate('menu');$('preferences-form').hidden=true;$('paused').hidden=false;updateSteps();toast('Dinner planning paused. No actions scheduled.');});
+    $('resume').addEventListener('click',()=>{state.paused=false;$('preferences-form').hidden=false;$('paused').hidden=true;updateSteps();});
+    $('reset').addEventListener('click',()=>{if(confirm('Clear this meal plan and start again?'))resetMealDraft();});
+    updateSteps();updateSummary();
+
+    // The meal planner is self-contained; its parent saves the same bounded snapshot
+    // as a standalone browser. Messages trust window identity, not opaque file origins.
+    const MEAL_STORAGE_KEY='tidy.meals.v4',MEAL_SNAPSHOT_LIMIT=256*1024;
+    const BASE_INGREDIENTS=JSON.parse(JSON.stringify(INGREDIENTS));
+    const framed=window.parent!==window;
+    let mealRestoring=false,mealResetting=false,mealSaveQueued=false,parentReady=!framed,editedBeforeParent=false,mealStockDrafts={},mealLoadInvalid=false,mealHasEdits=false,mealResetId='',mealResetTimer;
+    $('meal-store-links').hidden=!framed;
+    for(const control of document.querySelectorAll('[data-grocery-store]'))control.addEventListener('click',()=>{if(framed)window.parent.postMessage({type:'tidy-meals-open-store',store:control.dataset.groceryStore},'*');});
+    if(framed)document.body.classList.add('embedded');
+    const fail=message=>{throw Error(message);};
+    function plain(value,label){if(!value||typeof value!=='object'||Array.isArray(value))fail(label+' is missing or invalid.');return value;}
+    function keysAllowed(value,keys,label){plain(value,label);if(Object.keys(value).some(key=>!keys.includes(key)))fail(label+' contains an unsupported field.');}
+    function textValue(value,max,label,required=false,multiline=false){
+      if(typeof value!=='string'||value.length>max||(required&&!value.trim())||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)||(!multiline&&/[\r\n]/.test(value)))fail(label+' is invalid.');
+      return value;
+    }
+    function booleanValue(value,label){if(typeof value!=='boolean')fail(label+' is invalid.');return value;}
+    function numericValue(value,min,max,label,whole=false){if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max||(whole&&!Number.isInteger(value)))fail(label+' is invalid.');return value;}
+    function choiceValue(value,choices,label){if(!choices.includes(value))fail(label+' is invalid.');return value;}
+    function listValue(value,max,label){if(!Array.isArray(value)||value.length>max)fail(label+' is invalid.');return value;}
+    function numericDraft(value,label){textValue(value,40,label);if(value!==''&&(!/^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)||!Number.isFinite(Number(value))||Math.abs(Number(value))>1e12))fail(label+' is too large or invalid.');return value;}
+    function timeValue(value,label,empty=true){textValue(value,5,label);if(value!==''&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)||(!empty&&!value))fail(label+' is invalid.');return value;}
+    function captureMealAnswers(){return {
+      people:$('people').value,diet:$('diet').value,noAllergies:$('no-allergies').checked,
+      allergies:[...document.querySelectorAll('#allergy-options input:checked')].map(input=>input.value),
+      maxTime:$('max-time').value,gymNights:$('gym-nights').checked,shop:$('shop').value,
+      budget:$('budget').value,checkinDay:$('checkin-day').value,checkinTime:$('checkin-time').value
+    };}
+    function captureMealSnapshot(){
+      const stockInputs={...mealStockDrafts};for(const input of document.querySelectorAll('#pantry-list input'))stockInputs[input.id.slice(6)]=input.value;
+      return {version:4,state:JSON.parse(JSON.stringify(state)),answers:captureMealAnswers(),ingredients:JSON.parse(JSON.stringify(INGREDIENTS)),customIngredientNumber,
+        drafts:{mealDay:$('meal-day').value,mealRequest:$('meal-request').value,extraInput:$('extra-input').value,pantryConfirm:$('pantry-confirm').checked,stockInputs}};
+    }
+    function validateMealSnapshot(raw){
+      const serialized=JSON.stringify(raw);if(!serialized||new TextEncoder().encode(serialized).length>MEAL_SNAPSHOT_LIMIT)fail('The meal draft exceeds the 256 KB limit.');
+      const snapshot=JSON.parse(serialized);keysAllowed(snapshot,['version','state','answers','ingredients','customIngredientNumber','drafts'],'Meal draft');
+      if(snapshot.version!==4)fail('This meal draft uses an unsupported version.');
+      const s=snapshot.state,a=snapshot.answers,registry=snapshot.ingredients,d=snapshot.drafts;
+      keysAllowed(s,['step','prefs','menu','menuApproved','pantry','pantryReviewed','draftApproved','extras','delivery','paused','version'],'Meal state');
+      keysAllowed(a,['people','diet','noAllergies','allergies','maxTime','gymNights','shop','budget','checkinDay','checkinTime'],'Meal answers');
+      keysAllowed(d,['mealDay','mealRequest','extraInput','pantryConfirm','stockInputs'],'Unfinished meal fields');
+      const allergenKeys=ALLERGENS.map(item=>item[0]);
+      const validateAllergies=value=>{listValue(value,ALLERGENS.length,'Allergies');if(new Set(value).size!==value.length||value.some(key=>!allergenKeys.includes(key)))fail('Allergies are invalid.');};
+      numericDraft(a.people,'Number of people');choiceValue(a.diet,['','mixed','pescatarian','vegetarian','vegan'],'Diet');booleanValue(a.noAllergies,'Allergy answer');validateAllergies(a.allergies);
+      if(a.noAllergies&&a.allergies.length)fail('The allergy answers conflict.');
+      choiceValue(a.maxTime,['20','30','40'],'Cooking limit');booleanValue(a.gymNights,'Gym evenings');choiceValue(a.shop,['Kibsons','Carrefour','Waitrose'],'Shop');numericDraft(a.budget,'Budget');
+      choiceValue(a.checkinDay,['Sunday','Saturday','Friday','Monday','Off'],'Check-in day');timeValue(a.checkinTime,'Check-in time');
+      numericValue(s.step,1,4,'Meal step',true);numericValue(s.version,0,1000000,'Menu generation count',true);
+      for(const key of ['menuApproved','pantryReviewed','draftApproved','paused'])booleanValue(s[key],key);
+      textValue(s.delivery,100,'Delivery preference');
+      plain(registry,'Ingredient registry');if(Object.keys(registry).length>2000)fail('There are too many saved ingredients.');
+      let highestIngredient=0;
+      for(const [key,item] of Object.entries(registry)){
+        keysAllowed(item,['name','unit'],'Ingredient');textValue(item.name,80,'Ingredient name',true);choiceValue(item.unit,['g','ml','pieces'],'Ingredient unit');
+        if(Object.hasOwn(BASE_INGREDIENTS,key)){if(item.name!==BASE_INGREDIENTS[key].name||item.unit!==BASE_INGREDIENTS[key].unit)fail('An example ingredient was changed.');}
+        else {if(!/^customIngredient-[1-9]\d{0,5}$/.test(key))fail('An ingredient identifier is invalid.');highestIngredient=Math.max(highestIngredient,Number(key.slice(17)));}
+      }
+      for(const key of Object.keys(BASE_INGREDIENTS))if(!Object.hasOwn(registry,key))fail('An example ingredient is missing.');
+      numericValue(snapshot.customIngredientNumber,highestIngredient,999999,'Custom ingredient counter',true);
+      const validateQuantities=(items,label,positive=false)=>{
+        plain(items,label);if(Object.keys(items).length>2000)fail(label+' contains too many ingredients.');
+        for(const [key,amount] of Object.entries(items)){if(!Object.hasOwn(registry,key))fail(label+' refers to an unknown ingredient.');numericValue(amount,positive?Number.MIN_VALUE:0,1e12,label+' amount');if(positive&&registry[key].unit==='pieces'&&!Number.isInteger(amount))fail('Piece quantities must be whole numbers.');}
+      };
+      validateQuantities(s.pantry,'Kitchen quantities');plain(d.stockInputs,'Unfinished kitchen amounts');
+      if(Object.keys(d.stockInputs).length>2000)fail('There are too many unfinished kitchen amounts.');
+      for(const [key,value] of Object.entries(d.stockInputs)){if(!Object.hasOwn(registry,key))fail('An unfinished amount refers to an unknown ingredient.');numericDraft(value,'Unfinished kitchen amount');}
+      choiceValue(d.mealDay,DAYS,'Meal day');textValue(d.mealRequest,120,'Meal request');textValue(d.extraInput,100,'Extra request');booleanValue(d.pantryConfirm,'Kitchen check');
+      listValue(s.extras,200,'Extra groceries');const extraKeys=new Set();
+      for(const item of s.extras){keysAllowed(item,['key','name'],'Extra grocery');textValue(item.name,100,'Extra grocery name',true);textValue(item.key,200,'Extra grocery key',true);if(item.key!==item.name.toLocaleLowerCase()||extraKeys.has(item.key))fail('Extra groceries are duplicated or invalid.');extraKeys.add(item.key);}
+      listValue(s.menu,5,'Weekday menu');if(s.menu.length!==0&&s.menu.length!==5)fail('A saved menu must contain all five weekdays.');
+      if(s.prefs!==null){
+        const p=s.prefs;keysAllowed(p,['people','diet','allergies','maxTime','gymNights','shop','budget','checkinDay','checkinTime'],'Saved preferences');
+        numericValue(p.people,1,12,'People',true);choiceValue(p.diet,['mixed','pescatarian','vegetarian','vegan'],'Diet');validateAllergies(p.allergies);
+        choiceValue(p.maxTime,[20,30,40],'Cooking limit');booleanValue(p.gymNights,'Gym evenings');choiceValue(p.shop,['Kibsons','Carrefour','Waitrose'],'Shop');
+        if(p.budget!==null)numericValue(p.budget,0,1e12,'Budget');choiceValue(p.checkinDay,['Sunday','Saturday','Friday','Monday','Off'],'Check-in day');timeValue(p.checkinTime,'Check-in time',p.checkinDay==='Off');
+        if(Number(a.people)!==p.people||a.diet!==p.diet||JSON.stringify(a.allergies)!==JSON.stringify(p.allergies)||(!a.noAllergies&&!a.allergies.length)||Number(a.maxTime)!==p.maxTime||a.gymNights!==p.gymNights||a.shop!==p.shop||(a.budget===''?null:Number(a.budget))!==p.budget||a.checkinDay!==p.checkinDay||a.checkinTime!==p.checkinTime)fail('The saved preferences do not match the current answers.');
+      }else if(s.menu.length)fail('The menu has no saved preferences.');
+      const seenDays=new Set();
+      for(const meal of s.menu){
+        keysAllowed(meal,['day','id','custom'],'Dinner');choiceValue(meal.day,DAYS,'Dinner day');if(seenDays.has(meal.day))fail('A weekday is duplicated.');seenDays.add(meal.day);
+        const p=s.prefs,limit=p.gymNights&&['Tuesday','Thursday'].includes(meal.day)?Math.min(p.maxTime,20):p.maxTime;
+        if(meal.custom){
+          if(meal.id!==null)fail('A custom dinner has conflicting recipe identifiers.');const c=meal.custom;
+          keysAllowed(c,['name','time','ingredients','timeDraft','ingredientText','foodConfirmed','noGroceries','saved'],'Custom dinner');textValue(c.name,100,'Custom dinner name',true);
+          if(c.time!==null)numericValue(c.time,0,40,'Custom cooking time',true);numericDraft(c.timeDraft,'Unfinished cooking time');textValue(c.ingredientText,5000,'Custom recipe text',false,true);
+          for(const key of ['foodConfirmed','noGroceries','saved'])booleanValue(c[key],key);validateQuantities(c.ingredients,'Custom recipe quantities',true);
+          if(c.saved){
+            if(!c.foodConfirmed||c.timeDraft===''||Number(c.timeDraft)!==c.time||c.time>limit)fail('A reviewed recipe has incomplete cooking or food checks.');
+            if(c.noGroceries){if(Object.keys(c.ingredients).length)fail('A no-groceries meal has ingredients.');}
+            else {
+              const lines=c.ingredientText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);if(!lines.length||lines.length>30)fail('The reviewed recipe has invalid ingredients.');
+              const compiled={};const units={g:['g',1],kg:['g',1000],ml:['ml',1],l:['ml',1000],pieces:['pieces',1]};
+              for(const line of lines){const fields=line.split('|').map(part=>part.trim());if(fields.length!==3)fail('The reviewed ingredient text is invalid.');const [name,amountText,rawUnit]=fields;const unit=units[rawUnit.toLocaleLowerCase()];if(!Object.hasOwn(units,rawUnit.toLocaleLowerCase())||!name||!amountText||!Number.isFinite(Number(amountText))||Number(amountText)<=0||Number(amountText)>1000000)fail('A reviewed ingredient amount is invalid.');
+                const key=Object.keys(registry).find(key=>normalIngredientName(registry[key].name)===normalIngredientName(name)&&registry[key].unit===unit[0]);if(!key)fail('A reviewed ingredient is missing.');compiled[key]=(compiled[key]||0)+Number(amountText)*unit[1];}
+              if(Object.keys(compiled).length!==Object.keys(c.ingredients).length||Object.keys(compiled).some(key=>compiled[key]!==c.ingredients[key]))fail('The recipe amounts do not match the reviewed ingredient text.');
+            }
+          }
+          if(s.menuApproved&&(!c.saved||!c.foodConfirmed))fail('An unfinished custom dinner cannot be approved.');
+        }else {
+          const r=recipe(meal.id);if(!r||r.time>limit||r.allergens.some(key=>p.allergies.includes(key))||!(p.diet==='mixed'||p.diet==='pescatarian'&&r.diet!=='meat'||p.diet==='vegetarian'&&['vegetarian','vegan'].includes(r.diet)||p.diet==='vegan'&&r.diet==='vegan'))fail('A saved dinner does not match your food or cooking choices.');
+        }
+      }
+      if(s.menuApproved&&s.menu.length!==5||s.pantryReviewed&&!s.menuApproved||s.draftApproved&&!s.pantryReviewed)fail('The meal approvals are inconsistent.');
+      if(s.pantryReviewed){
+        if(!d.pantryConfirm)fail('The kitchen review is incomplete.');
+        for(const [key,amount] of Object.entries(s.pantry))if(registry[key].unit==='pieces'&&!Number.isInteger(amount))fail('Reviewed piece quantities must be whole numbers.');
+        for(const [key,value] of Object.entries(d.stockInputs)){const n=Number(value);if(value===''||n<0||registry[key].unit==='pieces'&&!Number.isInteger(n)||n!==(s.pantry[key]||0))fail('The reviewed kitchen amounts have changed.');}
+      }
+      if(s.step===2&&!s.menu.length||s.step===3&&!s.menuApproved||s.step===4&&(!s.menuApproved||!s.pantryReviewed))fail('The saved step is not available yet.');
+      return snapshot;
+    }
+    function saveStatus(message,error=false){$('save-status').textContent=message;$('save-status').dataset.error=String(error);}
+    function applyMealSnapshot(raw){
+      const snapshot=validateMealSnapshot(raw);mealRestoring=true;
+      try{
+        for(const key of Object.keys(INGREDIENTS))delete INGREDIENTS[key];Object.assign(INGREDIENTS,snapshot.ingredients);customIngredientNumber=snapshot.customIngredientNumber;
+        Object.assign(state,snapshot.state);const a=snapshot.answers,d=snapshot.drafts,wantedPaused=state.paused;mealStockDrafts={...d.stockInputs};
+        for(const [id,value] of [['people',a.people],['diet',a.diet],['max-time',a.maxTime],['shop',a.shop],['budget',a.budget],['checkin-day',a.checkinDay],['checkin-time',a.checkinTime]])$(id).value=value;
+        $('no-allergies').checked=a.noAllergies;$('gym-nights').checked=a.gymNights;
+        for(const input of document.querySelectorAll('#allergy-options input'))input.checked=a.allergies.includes(input.value);
+        $('meal-day').value=d.mealDay;$('meal-request').value=d.mealRequest;$('extra-input').value=d.extraInput;$('delivery').value=state.delivery;
+        $('meal-choices').replaceChildren();$('meal-message').textContent='';$('extra-message').textContent='';
+        for(const id of ['preferences-error','menu-error','menu-status','pantry-error'])setMessage(id,'');
+        $('meal-list').replaceChildren();$('pantry-list').replaceChildren();$('extra-list').replaceChildren();$('review-summary').replaceChildren();$('grocery-list').replaceChildren();
+        const wantedStep=state.step;state.paused=false;
+        if(state.menu.length)renderMenu();if(state.menuApproved)renderPantry();if(state.menuApproved&&state.pantryReviewed)renderReview();
+        go(wantedStep,false);state.paused=wantedPaused;
+        $('preferences-form').hidden=state.paused;$('paused').hidden=!state.paused;$('pantry-confirm').checked=d.pantryConfirm;
+        for(const [key,value] of Object.entries(d.stockInputs)){const input=$('stock-'+key);if(input)input.value=value;}
+        updateSteps();updateSummary();
+      }finally{mealRestoring=false;}
+      return snapshot;
+    }
+    function mealSummary(){return state.menuApproved?state.menu.slice(0,5).map(meal=>({day:meal.day,name:mealRecipe(meal).name})):[];}
+    function mealGrocerySummary(){
+      if(mealLoadInvalid||!state.menuApproved||!state.pantryReviewed)return {groceries:[],groceriesApproved:false};
+      return {groceries:shortageList().map(item=>({name:item.name,amount:item.amount,unit:item.unit})),groceriesApproved:state.draftApproved};
+    }
+    function reportMealRestore(valid,message=''){
+      const groceries=valid?mealGrocerySummary():{groceries:[],groceriesApproved:false};
+      window.parent.postMessage({type:'tidy-meals-restored',valid,message,summary:valid?mealSummary():[],...groceries},'*');
+    }
+    function persistMealDraft(){
+      mealSaveQueued=false;if(mealRestoring||mealResetting)return;
+      if(mealLoadInvalid){saveStatus('Your saved meal draft needs recovery. Current edits are kept on screen. Restore a valid backup or use Start over before saving again.',true);return;}
+      if(framed&&!parentReady){editedBeforeParent=true;saveStatus('Waiting for Tidy to save this meal draft. Keep this page open.');return;}
+      try{
+        const snapshot=validateMealSnapshot(captureMealSnapshot());
+        if(framed){window.parent.postMessage({type:'tidy-meals-change',snapshot,summary:mealSummary(),...mealGrocerySummary()},'*');saveStatus('Meal draft sent to Tidy for local saving.');}
+        else {localStorage.setItem(MEAL_STORAGE_KEY,JSON.stringify(snapshot));saveStatus('Meal draft saved on this browser. It is not synced to other devices.');}
+      }catch(error){saveStatus('This change could not be saved: '+error.message+' Keep this page open and download your approved grocery list when possible.',true);}
+    }
+    function queueMealSave(){if(mealRestoring||mealResetting||mealSaveQueued)return;mealHasEdits=true;mealSaveQueued=true;queueMicrotask(persistMealDraft);}
+    function resetMealDraft(){
+      mealResetting=true;
+      try{localStorage.removeItem(MEAL_STORAGE_KEY);}catch(error){if(!framed){saveStatus('The saved draft could not be cleared. '+error.message,true);mealResetting=false;return;}}
+      if(framed){
+        clearTimeout(mealResetTimer);mealResetId='reset-'+(window.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
+        for(const control of document.querySelectorAll('input,select,textarea,button'))control.disabled=true;
+        saveStatus('Clearing your meal draft with Tidy…');
+        window.parent.postMessage({type:'tidy-meals-change',snapshot:null,summary:[],groceries:[],groceriesApproved:false,resetId:mealResetId},'*');
+        mealResetTimer=setTimeout(()=>{$('reset').disabled=false;saveStatus('Tidy has not confirmed clearing this draft. Keep this page open and use Start over to try again. Current edits are not being saved while the reset is pending.',true);},5000);
+        return;
+      }
+      location.reload();
+    }
+    // Bubble-phase delegation runs after control handlers; the microtask also catches
+    // rerenders and all unsaved custom recipe inputs without replacing their listeners.
+    for(const eventName of ['input','change','click','submit'])document.addEventListener(eventName,queueMealSave);
+    window.addEventListener('pagehide',()=>{if(!mealResetting&&(!mealLoadInvalid||mealHasEdits))persistMealDraft();});
+    window.addEventListener('message',event=>{
+      if(event.source!==window.parent||!framed||!event.data||typeof event.data!=='object')return;
+      if(event.data.type==='tidy-meals-reset-ack'){
+        if(mealResetting&&event.data.resetId===mealResetId){clearTimeout(mealResetTimer);location.reload();}
+        return;
+      }
+      if(event.data.type==='tidy-meals-validate'){
+        const requestId=event.data.requestId;
+        try{textValue(requestId,100,'Validation request',true);}catch(error){return;}
+        try{if(event.data.snapshot!==null)validateMealSnapshot(event.data.snapshot);window.parent.postMessage({type:'tidy-meals-validation-result',requestId,valid:true,message:''},'*');}
+        catch(error){window.parent.postMessage({type:'tidy-meals-validation-result',requestId,valid:false,message:error.message},'*');}
+        return;
+      }
+      if(event.data.type==='tidy-meals-reset'){resetMealDraft();return;}
+      if(mealResetting)return;
+      if(event.data.type==='tidy-meals-storage-status'){
+        if(mealLoadInvalid)return;
+        if(event.data.saved===true)saveStatus('Meal draft saved with Tidy on this browser. It is not synced to other devices.');
+        else if(event.data.saved===false)saveStatus('Tidy could not save this draft. Keep this page open; changes may be lost when it closes.',true);
+        return;
+      }
+      if(event.data.type!=='tidy-meals-restore')return;
+      parentReady=true;
+      try{
+        if(event.data.snapshot!==null){
+          const restoredCandidate=validateMealSnapshot(event.data.snapshot);
+          if(editedBeforeParent){validateMealSnapshot(captureMealSnapshot());editedBeforeParent=false;mealLoadInvalid=false;mealHasEdits=false;saveStatus('Your current edits were kept instead of replacing them with an older draft.');reportMealRestore(true,'Current edits kept.');queueMealSave();return;}
+          applyMealSnapshot(restoredCandidate);saveStatus('Your locally saved meal draft was restored.');
+        }else saveStatus('Meal drafts are saved with Tidy on this browser.');
+        editedBeforeParent=false;mealLoadInvalid=false;mealHasEdits=false;reportMealRestore(true);queueMealSave();
+      }catch(error){mealLoadInvalid=true;mealHasEdits=false;saveStatus('The saved meal draft could not be restored: '+error.message+' Your current meal plan was kept.',true);reportMealRestore(false,error.message);}
+    });
+    if(framed){
+      saveStatus('Waiting for Tidy to restore your meal draft…');window.parent.postMessage({type:'tidy-meals-ready'},'*');
+      setTimeout(()=>{if(!parentReady)saveStatus('Tidy has not connected to meal saving. Keep this page open; changes are not saved yet.',true);},4000);
+      let lastHeight=0,heightQueued=false;
+      const reportHeight=()=>{if(heightQueued)return;heightQueued=true;requestAnimationFrame(()=>{heightQueued=false;const height=Math.min(20000,Math.max(400,document.body.scrollHeight));if(height!==lastHeight){lastHeight=height;window.parent.postMessage({type:'tidy-meals-height',height},'*');}});};
+      if('ResizeObserver'in window)new ResizeObserver(reportHeight).observe(document.body);window.addEventListener('resize',reportHeight);reportHeight();
+    }else {
+      let storedMealData=null;
+      try{
+        storedMealData=localStorage.getItem(MEAL_STORAGE_KEY);
+        if(storedMealData){applyMealSnapshot(JSON.parse(storedMealData));saveStatus('Your meal draft was restored from this browser.');}
+        else saveStatus('Meal drafts will be saved on this browser.');
+      }catch(error){mealLoadInvalid=storedMealData!==null;saveStatus('Local saving is unavailable or the saved draft is invalid: '+error.message+' Your current plan was kept.',true);}
+    }
+  </script>
+</body>
+</html>
