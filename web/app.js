@@ -317,4 +317,6 @@
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
   setupVoice();showView(location.hash.slice(1)||'today',false);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
+  // The iframe may finish loading before the parent registers its listeners.
+  postMealRestore();
 })();
