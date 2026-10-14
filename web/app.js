@@ -297,15 +297,23 @@
   }
   function loadWebsiteView(){
     if(!ui.websiteUrl)return;
+    $('website-choice').hidden=true;$('website-guidance').hidden=false;
     $('website-recovery').hidden=true;$('website-frame').hidden=false;
-    $('website-report-problem').disabled=false;$('website-retry').disabled=false;
+    $('website-report-problem').hidden=false;$('website-report-problem').disabled=false;$('website-retry').disabled=false;
     $('website-frame').src=ui.websiteUrl;
   }
   function openWebsite(url,title){
     try{
       const validated=safeLink(url);ui.websiteUrl=validated;
+      const amazon=['amazon.ae','www.amazon.ae'].includes(new URL(validated).hostname);
       $('website-title').textContent=title;$('website-frame').title=title+' website';
-      $('website-open-direct').href=validated;loadWebsiteView();
+      $('website-open-direct').href=validated;$('website-open-direct').textContent=amazon?'Open Amazon in browser':'Open directly';
+      $('website-guidance').textContent=amazon?"If Amazon shows a security check, you can try completing it in this view. If it fails, use Open Amazon in browser. On a phone, this may open your browser or Amazon's app.":"If the website shows a security check, you can try completing it in this view. If it fails, use Open directly. On a phone, this may open your browser or the website's app.";
+      if(amazon){
+        $('website-frame').src='about:blank';$('website-frame').hidden=true;
+        $('website-recovery').hidden=true;$('website-choice').hidden=false;$('website-guidance').hidden=true;
+        $('website-report-problem').hidden=true;$('website-report-problem').disabled=true;
+      }else loadWebsiteView();
       if(!$('website-dialog').open)$('website-dialog').showModal();
     }catch(problem){toast(problem.message);}
   }
@@ -398,7 +406,8 @@
   $('capture-form').addEventListener('submit',event=>{event.preventDefault();try{capture($('capture-text').value);}catch(problem){response(problem.message);}});
   for(const example of document.querySelectorAll('[data-example]'))example.addEventListener('click',()=>{$('capture-text').value=example.dataset.example;$('capture-text').focus();});
   for(const close of document.querySelectorAll('[data-close]'))close.addEventListener('click',()=>$(close.dataset.close).close());
-  $('website-dialog').addEventListener('close',()=>{ui.websiteUrl=null;$('website-frame').src='about:blank';$('website-frame').hidden=true;$('website-open-direct').removeAttribute('href');$('website-recovery').hidden=true;});
+  $('website-dialog').addEventListener('close',()=>{ui.websiteUrl=null;$('website-frame').src='about:blank';$('website-frame').hidden=true;$('website-open-direct').removeAttribute('href');$('website-recovery').hidden=true;$('website-choice').hidden=true;});
+  $('website-try-inside').addEventListener('click',()=>{loadWebsiteView();$('website-report-problem').focus();});
   $('website-report-problem').addEventListener('click',stopWebsiteView);
   $('website-retry').addEventListener('click',()=>{loadWebsiteView();$('website-report-problem').focus();});
   for(const field of [$('task-type'),$('task-repeat'),$('task-reminder')])field.addEventListener('change',()=>{if(field.id==='task-type'){if(field.value==='grocery')$('task-category').value='Shopping';if(field.value==='appointment')$('task-category').value='Health';}if($('task-reminder').checked&&!$('task-reminder-at').value&&$('task-date').value&&$('task-time').value)$('task-reminder-at').value=$('task-date').value+'T'+$('task-time').value;syncTaskControls();});

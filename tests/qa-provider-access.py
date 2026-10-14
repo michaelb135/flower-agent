@@ -151,6 +151,9 @@ def main():
             for name in ["Amazon UAE", "Health Square"]:
                 if name == "Amazon UAE":
                     tab.locator("#provider-list").get_by_role("button", name=name, exact=True).click()
+                    assert tab.locator("#website-choice").is_visible()
+                    assert tab.locator("#website-frame").get_attribute("src") == "about:blank"
+                    tab.locator("#website-try-inside").click()
                 else:
                     configure(tab, CLINIC)
                     tab.locator("#health-square-open").click()

@@ -139,6 +139,13 @@ with sync_playwright() as playwright:
         for name, url in STORES.items():
             before = count_for(url)
             open_store(name)
+            if name == "Amazon UAE":
+                assert page.locator("#website-choice").is_visible()
+                assert page.locator("#website-frame").is_hidden()
+                assert page.locator("#website-frame").get_attribute("src") == "about:blank"
+                assert count_for(url) == before
+                assert len(context.pages) == 1
+                page.locator("#website-try-inside").click()
             page.wait_for_function("url=>document.getElementById('website-frame').getAttribute('src')===url", arg=url)
             page.wait_for_timeout(100)
             assert count_for(url) == before + 1
@@ -151,13 +158,47 @@ with sync_playwright() as playwright:
             close_viewer()
             assert not page.locator("#website-open-direct").get_attribute("href")
 
-    run("All four prominent store buttons open the correct intercepted destination and secure direct link", four_destinations)
+    run("All four stores have correct destinations; Amazon waits for an explicit viewing choice", four_destinations)
+
+    def amazon_browser_choice():
+        amazon = STORES["Amazon UAE"]
+        before = count_for(amazon)
+        direct_before = count_for(amazon, "direct")
+        open_store("Amazon UAE")
+        assert page.locator("#website-choice").is_visible()
+        assert page.locator("#website-open-direct").inner_text() == "Open Amazon in browser"
+        assert page.locator("#website-frame").get_attribute("src") == "about:blank"
+        page.wait_for_timeout(300)
+        assert count_for(amazon) == before
+        assert len(context.pages) == 1
+        with page.expect_popup() as opened:
+            page.locator("#website-open-direct").click()
+        popup = opened.value
+        popup.wait_for_load_state("domcontentloaded")
+        assert popup.url == amazon
+        assert popup.evaluate("window.opener===null") is True
+        assert count_for(amazon, "direct") == direct_before + 1
+        assert page.locator("#website-choice").is_visible()
+        assert page.locator("#website-frame").get_attribute("src") == "about:blank"
+        popup.close()
+        preserved()
+        page.keyboard.press("Escape")
+        page.wait_for_function("!document.getElementById('website-dialog').open")
+        page.wait_for_function("!document.getElementById('website-open-direct').hasAttribute('href')")
+        assert not page.locator("#website-open-direct").get_attribute("href")
+        assert page.locator("#website-choice").is_hidden()
+        assert page.locator("#provider-list").get_by_role("button", name="Amazon UAE", exact=True).evaluate("node=>node===document.activeElement")
+        assert count_for(amazon) == before
+        preserved()
+
+    run("Amazon browser choice opens only on a click and Escape retains Tidy data and focus", amazon_browser_choice)
 
     def challenge_recovery():
         amazon = STORES["Amazon UAE"]
         fixture_mode[urlparse(amazon).hostname] = "challenge"
         before = count_for(amazon)
         open_store("Amazon UAE")
+        page.locator("#website-try-inside").click()
         page.wait_for_timeout(800)
         assert count_for(amazon) == before + 1
         assert len(context.pages) == 1
@@ -178,7 +219,6 @@ with sync_playwright() as playwright:
     def explicit_direct_navigation():
         amazon = STORES["Amazon UAE"]
         before = count_for(amazon, "direct")
-        assert before == 0
         with page.expect_popup() as opened:
             page.locator("#website-open-direct").click()
         popup = opened.value
@@ -270,6 +310,8 @@ with sync_playwright() as playwright:
                 box = control.bounding_box()
                 assert box["x"] >= 0 and box["x"] + box["width"] <= width, (width, name, box)
             open_store("Amazon UAE")
+            assert page.locator("#website-choice").is_visible()
+            page.locator("#website-try-inside").click()
             page.locator("#website-report-problem").click()
             for identity in ["website-open-direct", "website-retry"]:
                 control = page.locator("#" + identity)
