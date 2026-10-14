@@ -91,6 +91,51 @@ test('links preserve HTTPS verification and exclude embedded credentials and exe
   assert.equal(task(state, { link: 'https://example.com/clinic' }).link, 'https://example.com/clinic');
 });
 
+test('older backups load with no Health Square website configured', () => {
+  const legacy = Core.defaults();
+  delete legacy.settings.healthSquareUrl;
+  task(legacy, { notes: 'Keep this existing responsibility' });
+  const restored = Core.parseBackup(JSON.stringify(legacy));
+  assert.equal(restored.settings.healthSquareUrl, '');
+  assert.deepEqual(restored.tasks, legacy.tasks);
+  delete legacy.settings;
+  assert.equal(Core.validateSnapshot(legacy).settings.healthSquareUrl, '');
+});
+
+test('configured clinic URL normalizes and survives saving and backup restore without changing other preferences', () => {
+  const state = Core.defaults();
+  state.settings.checkinEnabled = true;
+  state.settings.healthSquareUrl = '  https://Clinic.Example.invalid/appointments?visit=first  ';
+  const clean = Core.validateSnapshot(state);
+  assert.equal(clean.settings.healthSquareUrl, 'https://clinic.example.invalid/appointments?visit=first');
+  const values = new Map();
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  Core.persist(storage, clean);
+  assert.deepEqual(Core.load(storage), clean);
+  assert.deepEqual(Core.parseBackup(Core.backupJSON(clean)), clean);
+  clean.settings.healthSquareUrl = '';
+  const cleared = Core.parseBackup(Core.backupJSON(clean));
+  assert.equal(cleared.settings.healthSquareUrl, '');
+  assert.equal(cleared.settings.checkinEnabled, true);
+});
+
+test('unsafe clinic links reject edits, persistence and backup imports before any stored data is replaced', () => {
+  const state = Core.defaults();
+  state.settings.healthSquareUrl = 'https://clinic.example.invalid/';
+  const before = Core.backupJSON(state);
+  let saved = before;
+  const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; } };
+  for (const url of ['http://clinic.example.invalid/', 'javascript:alert(1)', 'data:text/html,bad', 'https://user:password@clinic.example.invalid/', '//clinic.example.invalid/', 'invalid', 'https://clinic.example.invalid/' + 'a'.repeat(2048), null, 123]) {
+    const candidate = JSON.parse(before);
+    candidate.settings.healthSquareUrl = url;
+    assert.throws(() => Core.validateSnapshot(candidate));
+    assert.throws(() => Core.parseBackup(JSON.stringify(candidate)));
+    assert.throws(() => Core.persistIfUnchanged(storage, candidate, before));
+    assert.equal(saved, before);
+    assert.equal(Core.backupJSON(state), before);
+  }
+});
+
 test('edits clear obsolete reminders, can set a replacement, and leave existing data intact on failure', () => {
   const state = Core.defaults();
   const initial = task(state, { remindAt: NOW });

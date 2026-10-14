@@ -10,6 +10,10 @@ Amazon UAE, Kibsons, Carrefour UAE and Waitrose UAE appear together at the top o
 
 This handles the failed-page experience. It cannot override Amazon's security checks or establish that Amazon login/checkout works inside another website. A phone may open a direct store link in its browser or the store's app.
 
+Tools also has a **Health Square** card. Save the clinic's actual HTTPS website address once, then use its named button. The address is browser-local, included in backups, and protected against conflicting edits in another tab. No default clinic address is supplied: the available project documents name the clinic but do not identify its website. Saving a link does not establish that the clinic permits embedded viewing or provides online booking.
+
+Provider pages can open new windows from their own links, which some sign-in flows require. Tidy still tries the embedded view first and does not automatically open a separate window or let the provider navigate the Tidy page. Read-only Amazon checks on 14 October 2026 saw both a working embedded storefront and an Amazon security challenge. The cloud gateway blocked required Amazon asset/challenge hosts, so real sign-in and checkout remain unverified.
+
 ## Deployment
 
 The `Publish Tidy website` workflow tests and builds the site on pushes to `main`, then deploys to GitHub Pages. GitHub Pages must be enabled for this repository with **GitHub Actions** as its source. The workflow's normal repository token can deploy an enabled site; enabling Pages itself requires repository-owner access or a token with the relevant administration/Pages permissions. No secret values belong in this repository.
@@ -25,6 +29,8 @@ Run `node --test tests/core.test.cjs tests/assistant.test.cjs`, `python3 tools/c
 For browser checks, serve `web/` internally on port 8780 and run `python tests/qa-website.py`. The runner uses isolated synthetic data and intercepted retailer pages. It checks the four store destinations, failure recovery, deliberate direct opening, retry/close behavior, saved tasks/meals and narrow layouts. Do not present an internal localhost address as the published app or describe retailer fixtures as verified live login/checkout.
 
 Run `python3 tests/qa-concurrency.py --url http://127.0.0.1:8780/` against that server to check genuine same-browser storage events, independent editor changes, conflicting changes, unsaved-data recovery and meal restoration. Every scenario uses a fresh context and synthetic household data. The quota fixture simulates a failed storage write. These checks do not establish sharing between devices or authenticated family members.
+
+Run `python3 tests/qa-provider-access.py --url http://127.0.0.1:8780/` to check clinic address setup, persistence, URL validation, two-tab conflicts, provider popups and narrow-layout recovery. It uses intercepted provider pages and allows network requests only to the selected Tidy origin. It can also run against the confirmed published URL, with normal TLS verification. Synthetic clinic addresses in tests are not real clinic destinations.
 
 `tools/build_site.py --revision <commit> --output <empty-directory>` builds the deployable files. Use `unpublished` for a local build check.
 

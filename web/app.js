@@ -4,7 +4,7 @@
   const C=window.TidyCore, A=window.TidyAssistant, KEY='tidy.app.v1';
   const GROCERY_STORES=Object.freeze({Carrefour:{name:'Carrefour UAE',url:'https://www.carrefouruae.com/'},Waitrose:{name:'Waitrose UAE',url:'https://www.waitrose.ae/'},Kibsons:{name:'Kibsons',url:'https://www.kibsons.com/'}});
   const $=id=>document.getElementById(id);
-  const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
+  const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
   function button(text,handler,cls='button secondary small'){const node=el('button',text,cls);node.type='button';node.addEventListener('click',handler);return node;}
@@ -61,7 +61,7 @@
     for(const field of fields){
       const entered=typeof draft[field]==='string'?draft[field].trim():draft[field];
       if(same(entered,baseline[field]))merged[field]=latest[field];
-      else if(!same(latest[field],baseline[field])&&!same(entered,latest[field])){const label=({assigneeId:'person responsible',dueDate:'date',dueTime:'time',remindAt:'reminder time',checkinEnabled:'daily check-in preference',checkinTime:'check-in time',remindersPaused:'alert preference'})[field]||field;throw Error(`The ${label} changed in another tab. Your edits are still in this form; review the latest version before saving.`);}
+      else if(!same(latest[field],baseline[field])&&!same(entered,latest[field])){const label=({assigneeId:'person responsible',dueDate:'date',dueTime:'time',remindAt:'reminder time',checkinEnabled:'daily check-in preference',checkinTime:'check-in time',remindersPaused:'alert preference',healthSquareUrl:'Health Square website'})[field]||field;throw Error(`The ${label} changed in another tab. Your edits are still in this form; review the latest version before saving.`);}
       else merged[field]=entered;
     }
     return merged;
@@ -181,8 +181,33 @@
     lines.push('','Matching names in the two groups stay separate; check them together before buying.');
     download('Tidy-shopping-'+C.today()+'.txt',lines.join('\n')+'\n','text/plain;charset=utf-8');
   }
+  function renderHealthSquare(){
+    const url=state.settings.healthSquareUrl;
+    $('health-square-open').disabled=!url;
+    $('health-square-saved-link').textContent=url?'Current website: '+url:'';
+    $('health-square-saved-link').hidden=!url;
+    if(!ui.healthSquareEditing){$('health-square-url').value=url;ui.healthSquareBaseline={healthSquareUrl:url};}
+    $('health-square-cancel').hidden=!ui.healthSquareEditing;
+    $('health-square-status').textContent=ui.healthSquareStatus||(url?'Website kept on this browser.':'Save the website address to enable Health Square.');
+  }
+  function beginHealthSquareEdit(){
+    if(!ui.healthSquareEditing){ui.healthSquareBaseline={healthSquareUrl:state.settings.healthSquareUrl};ui.healthSquareEditing=true;}
+  }
+  function saveHealthSquare(event){
+    event.preventDefault();error('health-square-error','');
+    try{
+      refreshSavedData();
+      const draft=C.validateSnapshot({...state,settings:{...state.settings,healthSquareUrl:$('health-square-url').value}}).settings;
+      const merged=mergeFields(ui.healthSquareBaseline,state.settings,draft,['healthSquareUrl']);
+      state=C.validateSnapshot({...state,settings:{...state.settings,...merged}});
+      const saved=save();
+      if(saved){ui.healthSquareEditing=false;ui.healthSquareStatus=state.settings.healthSquareUrl?'Health Square website saved on this browser.':'Website removed; Health Square is disabled until you save an address.';}
+      else {ui.healthSquareEditing=true;ui.healthSquareStatus='Website change kept in this tab only. Download a backup before closing.';}
+      renderAll();
+    }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
+  }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();
   }
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
   function capture(text){
@@ -391,6 +416,11 @@
   $('shopping-meals').addEventListener('click',showMeals);$('download-shopping').addEventListener('click',downloadShopping);
   for(const [key,store] of Object.entries(GROCERY_STORES))$('shopping-store-links').append(button('Open '+key,()=>openWebsite(store.url,store.name)));
   for(const [name,url] of [['Amazon UAE','https://www.amazon.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Waitrose UAE','https://www.waitrose.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
+  $('health-square-url').addEventListener('focus',beginHealthSquareEdit);
+  $('health-square-url').addEventListener('input',()=>{beginHealthSquareEdit();error('health-square-error','');ui.healthSquareStatus='Website change not saved yet.';renderHealthSquare();});
+  $('health-square-form').addEventListener('submit',saveHealthSquare);
+  $('health-square-cancel').addEventListener('click',()=>{ui.healthSquareEditing=false;ui.healthSquareStatus='';error('health-square-error','');renderHealthSquare();});
+  $('health-square-open').addEventListener('click',()=>{try{if(refreshSavedData())renderAll();if(state.settings.healthSquareUrl)openWebsite(state.settings.healthSquareUrl,'Health Square');}catch(problem){toast(problem.message);}});
   window.addEventListener('message',event=>{
     if(event.source!==$('meals-frame').contentWindow||event.origin!==location.origin||!event.data||typeof event.data!=='object')return;
     const message=event.data;

@@ -101,7 +101,7 @@
       schemaVersion: 1,
       members: [{ id: 'mum', name: 'Mum' }, { id: 'dad', name: 'Dad' }, { id: 'child', name: 'Child' }, { id: 'nanny', name: 'Nanny' }],
       tasks: [], actions: [],
-      settings: { timezone: 'Asia/Dubai', remindersPaused: false, checkinEnabled: false, checkinTime: '09:00', checkinLastDate: '' },
+      settings: { timezone: 'Asia/Dubai', remindersPaused: false, checkinEnabled: false, checkinTime: '09:00', checkinLastDate: '', healthSquareUrl: '' },
       mealSnapshot: null, mealSummary: []
     };
   }
@@ -216,7 +216,8 @@
       remindersPaused: bool(inputSettings.remindersPaused, false, 'Paused reminders'),
       checkinEnabled: bool(inputSettings.checkinEnabled, false, 'Daily check-in'),
       checkinTime: time(inputSettings.checkinTime === undefined ? '09:00' : inputSettings.checkinTime, 'check-in time'),
-      checkinLastDate: date(inputSettings.checkinLastDate, 'last check-in date', true)
+      checkinLastDate: date(inputSettings.checkinLastDate, 'last check-in date', true),
+      healthSquareUrl: link(inputSettings.healthSquareUrl)
     };
     const mealSummary = list(data.mealSummary === undefined ? [] : data.mealSummary, 5, 'Meal summary').map(meal => {
       object(meal, 'Meal summary');
