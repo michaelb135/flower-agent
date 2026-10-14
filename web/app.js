@@ -424,7 +424,7 @@
   $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',showMeals);$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});$('show-requests').addEventListener('click',()=>{$('requests-card').scrollIntoView({block:'start'});});
   $('shopping-meals').addEventListener('click',showMeals);$('download-shopping').addEventListener('click',downloadShopping);
   for(const [key,store] of Object.entries(GROCERY_STORES))$('shopping-store-links').append(button('Open '+key,()=>openWebsite(store.url,store.name)));
-  for(const [name,url] of [['Amazon UAE','https://www.amazon.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Waitrose UAE','https://www.waitrose.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
+  for(const [name,url] of [['Waitrose UAE','https://www.waitrose.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Amazon UAE','https://www.amazon.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
   $('health-square-url').addEventListener('focus',beginHealthSquareEdit);
   $('health-square-url').addEventListener('input',()=>{beginHealthSquareEdit();error('health-square-error','');ui.healthSquareStatus='Website change not saved yet.';renderHealthSquare();});
   $('health-square-form').addEventListener('submit',saveHealthSquare);
