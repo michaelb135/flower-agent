@@ -43,6 +43,46 @@ test('calendar dates, clock times and member assignments are validated before mu
   assert.equal(result.status, 'open');
 });
 
+test('new household names reject trimmed case-insensitive duplicates while legacy duplicate names stay readable', () => {
+  const state = Core.defaults();
+  const before = Core.backupJSON(state);
+  for (const name of ['Mum', ' mum ', 'MUM']) {
+    assert.throws(() => Core.createMember(state, { name }, NOW), /household name already exists/);
+    assert.equal(Core.backupJSON(state), before);
+  }
+  const member = Core.createMember(state, { name: '  Grandma  ' }, NOW);
+  assert.equal(member.name, 'Grandma');
+  assert.equal(state.members.at(-1), member);
+  const valid = Core.backupJSON(state);
+  assert.throws(() => Core.createMember(state, { id: member.id, name: 'Uncle' }, NOW), /Duplicate member ID/);
+  assert.equal(Core.backupJSON(state), valid);
+  const legacy = { ...state, members: [...state.members, { id: 'legacy-mum', name: 'mUm' }] };
+  const restored = Core.parseBackup(JSON.stringify(legacy));
+  assert.equal(restored.members.filter(item => item.name.toLowerCase() === 'mum').length, 2);
+  assert.equal(Core.backupJSON(restored), JSON.stringify(restored));
+});
+
+test('unrenderable reminder timestamps reject imports and edits before replacing recoverable data', () => {
+  const state = Core.defaults();
+  const item = task(state, { remindAt: 0, deliveredReminderAt: 0 });
+  const before = Core.backupJSON(state);
+  const minimum = Core.dueEpoch('0001-01-01', '00:00');
+  const maximum = Core.dueEpoch('9999-12-31', '23:59') + 59999;
+  for (const remindAt of [8640000000000000, -8640000000000000, minimum - 1, maximum + 1]) {
+    assert.throws(() => Core.updateTask(state, item.id, { remindAt }, NOW), /Invalid reminder time/);
+    assert.throws(() => task(state, { remindAt }), /Invalid reminder time/);
+    const imported = JSON.parse(before);
+    imported.tasks[0].remindAt = remindAt;
+    assert.throws(() => Core.parseBackup(JSON.stringify(imported)), /Invalid reminder time/);
+    assert.equal(Core.backupJSON(state), before);
+  }
+  assert.throws(() => Core.updateTask(state, item.id, { deliveredReminderAt: 8640000000000000 }, NOW), /Invalid delivered reminder time/);
+  Core.updateTask(state, item.id, { remindAt: minimum }, NOW);
+  assert.equal(item.remindAt, minimum);
+  Core.updateTask(state, item.id, { remindAt: maximum }, NOW);
+  assert.equal(item.remindAt, maximum);
+});
+
 test('links preserve HTTPS verification and exclude embedded credentials and executable schemes', () => {
   const state = Core.defaults();
   for (const value of ['http://example.com', 'javascript:alert(1)', 'data:text/html,bad', 'https://username:password@example.com', '//example.com']) {
@@ -134,6 +174,29 @@ test('reopening an older recurring task on a later date reuses its existing open
   Core.completeTask(state, state.tasks[1].id, NOW + 86400000);
   assert.equal(state.tasks.length, 3);
   assert.equal(state.tasks[2].dueDate, '2026-10-14');
+});
+
+test('stopping a routine preserves its history and prevents historical reopening from restarting it', () => {
+  const state = Core.defaults();
+  const original = task(state, { repeat: 'daily' });
+  const unrelated = task(state, { title: 'Other routine', repeat: 'weekly' });
+  Core.completeTask(state, original.id, NOW);
+  const upcoming = state.tasks.find(item => item.seriesId === original.id && item.status === 'open');
+  const dates = state.tasks.map(item => item.dueDate);
+  Core.stopRepeating(state, upcoming.id);
+  assert.equal(original.repeat, 'none');
+  assert.equal(original.status, 'done');
+  assert.equal(upcoming.repeat, 'none');
+  assert.equal(upcoming.status, 'open');
+  assert.equal(unrelated.repeat, 'weekly');
+  assert.deepEqual(state.tasks.map(item => item.dueDate), dates);
+  Core.completeTask(state, upcoming.id, NOW + 86400000);
+  const restored = Core.parseBackup(Core.backupJSON(state));
+  Core.reopenTask(restored, original.id, NOW + 2 * 86400000);
+  Core.completeTask(restored, original.id, NOW + 2 * 86400000);
+  assert.equal(restored.tasks.length, 3);
+  assert.equal(restored.tasks.filter(item => item.seriesId === original.id && item.status === 'open').length, 0);
+  assert.throws(() => Core.stopRepeating(restored, 'missing'), /Task not found/);
 });
 
 test('due reminders are ordered, exclude future tasks and support pausing', () => {
@@ -295,4 +358,24 @@ test('deleting a task removes only that task', () => {
   assert.equal(state.tasks.length, 1);
   assert.equal(state.tasks[0].id, second.id);
   assert.throws(() => Core.deleteTask(state, first.id), /not found/);
+});
+
+test('conditional persistence rejects a changed stored snapshot without overwriting either version', () => {
+  const local = Core.defaults();
+  const remote = Core.defaults();
+  Core.createTask(local, { title: 'Local responsibility' });
+  Core.createTask(remote, { title: 'Other tab responsibility' });
+  const original = Core.backupJSON(Core.defaults());
+  let stored = original;
+  let writes = 0;
+  const storage = { getItem: () => stored, setItem: (_, value) => { stored = value; writes++; } };
+  stored = Core.backupJSON(remote);
+  assert.throws(() => Core.persistIfUnchanged(storage, local, original), error => error.code === 'TIDY_STORAGE_CONFLICT');
+  assert.equal(writes, 0);
+  assert.equal(Core.parseBackup(stored).tasks[0].title, 'Other tab responsibility');
+  assert.equal(local.tasks[0].title, 'Local responsibility');
+  const written = Core.persistIfUnchanged(storage, local, stored);
+  assert.equal(writes, 1);
+  assert.equal(written, stored);
+  assert.equal(Core.parseBackup(stored).tasks[0].title, 'Local responsibility');
 });

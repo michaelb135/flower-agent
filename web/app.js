@@ -4,7 +4,7 @@
   const C=window.TidyCore, A=window.TidyAssistant, KEY='tidy.app.v1';
   const GROCERY_STORES=Object.freeze({Carrefour:{name:'Carrefour UAE',url:'https://www.carrefouruae.com/'},Waitrose:{name:'Waitrose UAE',url:'https://www.waitrose.ae/'},Kibsons:{name:'Kibsons',url:'https://www.kibsons.com/'}});
   const $=id=>document.getElementById(id);
-  const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,lastDraft:null,storage:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
+  const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
   function button(text,handler,cls='button secondary small'){const node=el('button',text,cls);node.type='button';node.addEventListener('click',handler);return node;}
@@ -19,22 +19,56 @@
   function empty(container,text,action){const node=el('div',undefined,'empty');node.append(el('p',text));if(action)node.append(action);container.append(node);}
   function download(name,text,type='application/json;charset=utf-8'){const url=URL.createObjectURL(new Blob([text],{type})),a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function storageWarning(text){$('storage-warning').textContent=text;$('storage-warning').hidden=!text;$('save-status').textContent=text?'Not saved locally':'Saved on this browser';$('footer-status').textContent=text?'Changes may be in this tab only · download a backup':'Local saving on this browser · no cloud sync';}
+  function copy(value){return JSON.parse(JSON.stringify(value));}
+  function same(a,b){return JSON.stringify(a)===JSON.stringify(b);}
+  function mealConflictWarning(){storageWarning('A different meal draft was saved in another tab. Your current meal edits are kept here and have not replaced it. Download a backup before closing; restore a backup to choose which version to keep.');}
   function save(){
     if(ui.storageLocked){storageWarning('Existing saved data could not be read. It has been preserved. New changes stay in this tab until you restore a valid backup; download a backup before closing.');return false;}
-    try{C.persist(ui.storage,state,KEY);ui.saveFailed=false;storageWarning('');return true;}
+    if(ui.mealConflict){mealConflictWarning();return false;}
+    try{ui.storageBaseline=C.persistIfUnchanged(ui.storage,state,ui.storageBaseline,KEY);ui.savedMealSnapshot=copy(state.mealSnapshot);ui.savedMealSummary=copy(state.mealSummary);ui.saveFailed=false;storageWarning('');return true;}
     catch(problem){ui.saveFailed=true;storageWarning(problem.message+' Changes stay in this tab; download a backup before closing.');return false;}
   }
   function startStorage(){
-    try{ui.storage=window.localStorage;state=C.load(ui.storage,KEY)||C.defaults();storageWarning('');}
+    try{ui.storage=window.localStorage;ui.storageBaseline=ui.storage.getItem(KEY);state=ui.storageBaseline===null?C.defaults():C.parseBackup(ui.storageBaseline);ui.savedMealSnapshot=copy(state.mealSnapshot);ui.savedMealSummary=copy(state.mealSummary);storageWarning('');}
     catch(problem){
-      try{ui.recoveryText=ui.storage?.getItem(KEY)||null;}catch(_){}
-      ui.storageLocked=Boolean(ui.recoveryText);ui.saveFailed=true;
+      try{ui.recoveryText=ui.storage?.getItem(KEY)??null;}catch(_){}
+      ui.storageLocked=ui.recoveryText!==null;ui.saveFailed=true;
       storageWarning(problem.message+' Existing data has not been overwritten. Download a recovery copy or restore a valid backup.');
     }
   }
+  function refreshSavedData(restoreMeals=true){
+    if(!ui.storage)return false;
+    let raw;
+    try{raw=ui.storage.getItem(KEY);}catch(_){return false;}
+    if(raw===ui.storageBaseline)return false;
+    if(raw===null){ui.saveFailed=true;storageWarning('Another tab cleared the saved data. Your current data is kept in this tab; download a backup before closing.');return false;}
+    let latest;
+    try{latest=C.parseBackup(raw);}catch(_){ui.storageLocked=true;ui.saveFailed=true;if(ui.recoveryText===null)ui.recoveryText=raw;storageWarning('Another tab saved data that could not be read. Your current data and the unreadable saved copy have been kept; download backups before closing.');return false;}
+    ui.savedMealSnapshot=copy(latest.mealSnapshot);ui.savedMealSummary=copy(latest.mealSummary);
+    if(ui.storageLocked||ui.saveFailed||ui.mealConflict){
+      if(ui.mealConflict)mealConflictWarning();
+      else storageWarning('Another tab updated the saved data. Your unsaved changes are still kept in this tab; download a backup before closing or restore a backup to choose which version to keep.');
+      return false;
+    }
+    const mealChanged=!same(state.mealSnapshot,latest.mealSnapshot);
+    state=latest;ui.storageBaseline=raw;
+    if(restoreMeals&&mealChanged&&!ui.mealDirty)postMealRestore();
+    return true;
+  }
+  function mergeFields(baseline,latest,draft,fields){
+    if(!baseline||!latest)throw Error('This item was removed or replaced in another tab. Your edits are still in this form; cancel and review the latest data.');
+    const merged={};
+    for(const field of fields){
+      const entered=typeof draft[field]==='string'?draft[field].trim():draft[field];
+      if(same(entered,baseline[field]))merged[field]=latest[field];
+      else if(!same(latest[field],baseline[field])&&!same(entered,latest[field])){const label=({assigneeId:'person responsible',dueDate:'date',dueTime:'time',remindAt:'reminder time',checkinEnabled:'daily check-in preference',checkinTime:'check-in time',remindersPaused:'alert preference'})[field]||field;throw Error(`The ${label} changed in another tab. Your edits are still in this form; review the latest version before saving.`);}
+      else merged[field]=entered;
+    }
+    return merged;
+  }
   function mutate(work,message){
-    const previous=C.validateSnapshot(state);
-    try{work();state=C.validateSnapshot(state);const saved=save();renderAll();if(message)toast(message+(saved?'':' · not saved locally'));return true;}
+    let previous=C.validateSnapshot(state);
+    try{refreshSavedData();previous=C.validateSnapshot(state);work();state=C.validateSnapshot(state);const saved=save();renderAll();if(message)toast(message+(saved?'':' · not saved locally'));return true;}
     catch(problem){state=previous;renderAll();toast(problem.message+' The previous data was kept.');return false;}
   }
   function showView(view,focus=true){
@@ -62,19 +96,20 @@
     copy.append(metadata);let when=task.dueDate?`${prettyDate(task.dueDate)}${task.dueTime?' · '+task.dueTime:''}`:'Choose a date when ready';
     if(task.status==='open'&&task.dueDate&&task.dueDate<C.today())when+=' · unfinished';copy.append(el('div',when,'task-time'));
     if(task.remindAt!==null)copy.append(el('div',`${task.deliveredReminderAt===task.remindAt?'Alert shown':'Alert set'} · ${clockValue(task.remindAt).replace('T',' ')} Dubai`,'task-time'));
-    top.append(copy);const done=button(task.status==='done'?'↶':'✓',()=>mutate(()=>task.status==='done'?C.reopenTask(state,task.id):C.completeTask(state,task.id),task.status==='done'?'Reopened':'Marked done'),'done-button');done.setAttribute('aria-label',(task.status==='done'?'Reopen ':'Complete ')+task.title);top.append(done);row.append(top);
+    top.append(copy);const done=button(task.status==='done'?'↶':'✓',()=>mutate(()=>{const latest=state.tasks.find(item=>item.id===task.id);if(!latest||latest.status!==task.status)throw Error('This task changed in another tab. Review its current status before changing it.');return task.status==='done'?C.reopenTask(state,task.id):C.completeTask(state,task.id);},task.status==='done'?'Reopened':'Marked done'),'done-button');done.setAttribute('aria-label',(task.status==='done'?'Reopen ':'Complete ')+task.title);top.append(done);row.append(top);
     if(task.notes&&!compact)row.append(el('p',task.notes));
     const actions=el('div',undefined,'task-actions');actions.append(button('Edit',()=>openTask(task,task.id)));
     if(task.link)actions.append(button('View website',()=>openWebsite(task.link,task.title)));
     if(task.status==='open'&&task.dueDate&&task.dueDate<C.today())actions.append(button('Move to tomorrow',()=>mutate(()=>C.updateTask(state,task.id,{dueDate:C.addDays(C.today(),1),remindAt:null,deliveredReminderAt:null}),'Moved to tomorrow. Choose a new reminder if needed.')));
     if(task.status==='open'&&task.remindAt!==null)actions.append(button('Remind in 1 hour',()=>mutate(()=>C.updateTask(state,task.id,{remindAt:Math.floor(Date.now()/60000)*60000+3600000}),'Reminder moved one hour ahead')));
-    if(ui.view==='routines'&&task.repeat!=='none')actions.append(button('Stop repeating',()=>mutate(()=>{for(const occurrence of state.tasks.filter(item=>item.status==='open'&&(item.id===task.id||task.seriesId&&item.seriesId===task.seriesId)))C.updateTask(state,occurrence.id,{repeat:'none'});},'Repetition stopped for this routine. Existing tasks remain.')));
+    if(ui.view==='routines'&&task.repeat!=='none')actions.append(button('Stop repeating',()=>mutate(()=>C.stopRepeating(state,task.id),'Repetition stopped for this routine. Existing tasks remain.')));
     if(!compact)actions.append(button('Remove',()=>{if(confirm('Remove this item from Tidy? This does not cancel anything with a provider.'))mutate(()=>C.deleteTask(state,task.id),'Removed from Tidy');},'button text small'));
     row.append(actions);return row;
   }
   function taskList(id,tasks,none,compact=false){const target=$(id);target.replaceChildren();for(const task of sorted(tasks))target.append(taskCard(task,compact));if(!tasks.length)empty(target,none);}
   function renderToday(){
     const date=C.today(),open=state.tasks.filter(task=>task.status==='open'),filter=$('today-person').value;
+    ui.todayDate=date;
     const visible=open.filter(task=>filter==='all'||task.assigneeId===filter);
     $('today-date').textContent=new Intl.DateTimeFormat('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:'Asia/Dubai'}).format(new Date())+' · Dubai time';
     const stats=$('today-stats');stats.replaceChildren();for(const [count,label] of [[open.filter(task=>task.dueDate===date).length,'Due today'],[open.filter(task=>task.dueDate&&task.dueDate<date).length,'Unfinished'],[state.actions.filter(action=>action.status==='needs_review').length,'Drafts to review']]){const card=el('div',undefined,'stat');card.append(el('strong',String(count)),el('span',label));stats.append(card);}
@@ -108,14 +143,15 @@
       if(action.details)card.append(el('p',action.details,'helper'));
       if(action.status==='approved_draft')card.append(el('p','No message, purchase or booking has been carried out by Tidy. Complete it yourself with the provider.','helper'));
       const actions=el('div',undefined,'actions');actions.append(button('Edit draft',()=>openAction(action,action.id)));
-      if(action.status==='needs_review')actions.append(button('Approve draft',()=>mutate(()=>{action.status='approved_draft';},'Draft approved. No external action taken.')));
+      if(action.status==='needs_review')actions.append(button('Approve draft',()=>mutate(()=>changeActionStatus(action,'approved_draft'),'Draft approved. No external action taken.')));
       if(action.link)actions.append(button('View website',()=>openWebsite(action.link,action.provider||action.title)));
-      if(action.status==='approved_draft')actions.append(button('I completed it outside Tidy',()=>{if(confirm('Have you completed this yourself? Tidy cannot verify it with the provider.'))mutate(()=>{action.status='manually_completed';},'Recorded your manual completion');}));
-      if(!['cancelled','manually_completed'].includes(action.status))actions.append(button('Discard draft',()=>mutate(()=>{action.status='cancelled';},'Draft discarded; no provider action cancelled'),'button text small'));
+      if(action.status==='approved_draft')actions.append(button('I completed it outside Tidy',()=>{if(confirm('Have you completed this yourself? Tidy cannot verify it with the provider.'))mutate(()=>changeActionStatus(action,'manually_completed'),'Recorded your manual completion');}));
+      if(!['cancelled','manually_completed'].includes(action.status))actions.append(button('Discard draft',()=>mutate(()=>changeActionStatus(action,'cancelled'),'Draft discarded; no provider action cancelled'),'button text small'));
       card.append(actions);target.append(card);
     }
     if(!state.actions.length)empty(target,'No prepared requests yet. Ask Tidy to prepare a purchase, booking or message.');
   }
+  function changeActionStatus(shown,status){const latest=state.actions.find(action=>action.id===shown.id);if(!latest||!same(shown,latest))throw Error('This request changed in another tab. Review the current draft before changing its approval.');latest.status=status;}
   function readMealGroceries(message){
     ui.mealGroceries=[];ui.groceriesApproved=false;
     const list=message.groceries;
@@ -150,6 +186,7 @@
   }
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
   function capture(text){
+    if(refreshSavedData())renderAll();
     const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks});response(result.message);
     if(result.kind==='answer')return;
     if(result.kind==='action'){
@@ -168,11 +205,11 @@
     if(mutate(()=>{created=C.createTask(state,draft);},'Saved to Tidy')){response(`${ui.saveFailed||ui.storageLocked?'Kept in this tab; download a backup before closing.':'Saved on this browser.'} ${created.type==='grocery'?'Grocery item':created.type==='appointment'?'Appointment you entered':'Task'}: ${created.title}. ${result.message}${created.remindAt!==null?' The demo must remain open to show this alert.':''}`);$('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));if(created.type==='grocery')$('assistant-followup').append(button('View shopping',()=>{showView('tools');$('shopping-card').scrollIntoView({block:'start'});}));}
   }
   function openTask(draft={},editingId=null,message='',requestReminder=false){
-    ui.editingTask=editingId;error('task-error','');$('task-dialog-title').textContent=editingId?'Edit task':'Add a task';$('task-draft-message').textContent=message;
+    ui.editingTask=editingId;ui.taskBaseline=editingId?copy(state.tasks.find(task=>task.id===editingId)||null):null;error('task-error','');$('task-dialog-title').textContent=editingId?'Edit task':'Add a task';$('task-draft-message').textContent=message;
     populatePeople($('task-person'),'Unassigned','');
     $('task-title').value=draft.title||'';$('task-type').value=draft.type||'task';$('task-category').value=draft.category||'Home';$('task-person').value=draft.assigneeId||'';$('task-priority').value=draft.priority||'normal';$('task-date').value=draft.dueDate||'';$('task-time').value=draft.dueTime||'';$('task-repeat').value=draft.repeat||'none';$('task-quantity').value=draft.quantity||'';$('task-notes').value=draft.notes||'';$('task-link').value=draft.link||'';
     $('task-reminder').checked=draft.remindAt!==null&&draft.remindAt!==undefined||requestReminder;
-    $('task-reminder-at').value=draft.remindAt?clockValue(draft.remindAt):draft.dueDate&&draft.dueTime&&requestReminder?draft.dueDate+'T'+draft.dueTime:'';
+    $('task-reminder-at').value=draft.remindAt!==null&&draft.remindAt!==undefined?clockValue(draft.remindAt):draft.dueDate&&draft.dueTime&&requestReminder?draft.dueDate+'T'+draft.dueTime:'';
     syncTaskControls();$('task-dialog').showModal();$('task-title').focus();
   }
   function syncTaskControls(){
@@ -182,27 +219,47 @@
   function saveTask(event){
     event.preventDefault();error('task-error','');
     try{
+      refreshSavedData();
       let remindAt=null;
-      if($('task-reminder').checked){const parts=$('task-reminder-at').value.split('T');if(parts.length!==2)throw Error('Choose a reminder date and time.');remindAt=C.dueEpoch(parts[0],parts[1]);const old=state.tasks.find(task=>task.id===ui.editingTask);if(remindAt<=Date.now()&&remindAt!==old?.remindAt)throw Error('Choose a reminder time in the future.');}
-      const patch={title:$('task-title').value,category:$('task-category').value,assigneeId:$('task-person').value||null,type:$('task-type').value,priority:$('task-priority').value,dueDate:$('task-date').value,dueTime:$('task-time').value,repeat:$('task-repeat').value,quantity:$('task-quantity').value,notes:$('task-notes').value,link:$('task-link').value,remindAt};
+      if($('task-reminder').checked){const parts=$('task-reminder-at').value.split('T');if(parts.length!==2)throw Error('Choose a reminder date and time.');remindAt=C.dueEpoch(parts[0],parts[1]);}
+      let patch={title:$('task-title').value,category:$('task-category').value,assigneeId:$('task-person').value||null,type:$('task-type').value,priority:$('task-priority').value,dueDate:$('task-date').value,dueTime:$('task-time').value,repeat:$('task-repeat').value,quantity:$('task-quantity').value,notes:$('task-notes').value,link:$('task-link').value,remindAt};
+      const old=state.tasks.find(task=>task.id===ui.editingTask);
+      if(ui.editingTask)patch=mergeFields(ui.taskBaseline,old,patch,Object.keys(patch));
+      if(patch.remindAt!==null&&patch.remindAt<=Date.now()&&patch.remindAt!==old?.remindAt)throw Error('Choose a reminder time in the future.');
       const task=ui.editingTask?C.updateTask(state,ui.editingTask,patch):C.createTask(state,patch);const saved=save();$('task-dialog').close();renderAll();toast('Saved '+task.title+(saved?'':' · in this tab only'));checkReminders();
     }catch(problem){error('task-error',problem.message);}
   }
-  function openAction(action={},editingId=null){ui.editingAction=editingId;error('action-error','');$('action-title').value=action.title||'';$('action-kind').value=action.kind||'purchase';$('action-provider').value=action.provider||'';$('action-link').value=action.link||'';$('action-details').value=action.details||'';$('action-dialog').showModal();}
+  function openAction(action={},editingId=null){ui.editingAction=editingId;ui.actionBaseline=editingId?copy(state.actions.find(item=>item.id===editingId)||null):null;error('action-error','');$('action-title').value=action.title||'';$('action-kind').value=action.kind||'purchase';$('action-provider').value=action.provider||'';$('action-link').value=action.link||'';$('action-details').value=action.details||'';$('action-dialog').showModal();}
   function saveAction(event){
     event.preventDefault();error('action-error','');
     try{
-      const old=state.actions.find(action=>action.id===ui.editingAction),action={id:old?.id||id('request'),kind:$('action-kind').value,title:$('action-title').value,provider:$('action-provider').value,link:$('action-link').value,details:$('action-details').value,status:'needs_review',createdAt:old?.createdAt||Date.now()};
+      refreshSavedData();const old=state.actions.find(action=>action.id===ui.editingAction);
+      let draft={kind:$('action-kind').value,title:$('action-title').value,provider:$('action-provider').value,link:$('action-link').value,details:$('action-details').value};
+      if(ui.editingAction){draft=mergeFields(ui.actionBaseline,old,draft,Object.keys(draft));if(old.status!==ui.actionBaseline.status)throw Error('This request changed its approval status in another tab. Your edits are still in this form; review the current request.');}
+      const action={...draft,id:old?.id||id('request'),status:'needs_review',createdAt:old?.createdAt??Date.now()};
       const candidate=C.validateSnapshot({...state,actions:old?state.actions.map(item=>item.id===old.id?action:item):[...state.actions,action]});state=candidate;const saved=save();$('action-dialog').close();renderAll();toast('Draft saved for review'+(saved?'':' · in this tab only'));
     }catch(problem){error('action-error',problem.message);}
   }
-  function openMember(member=null){ui.editingMember=member?.id||null;$('member-name').value=member?.name||'';error('member-error','');$('member-dialog').showModal();}
-  function saveMember(event){event.preventDefault();error('member-error','');try{const member={id:ui.editingMember||id('person'),name:$('member-name').value};const next=C.validateSnapshot({...state,members:ui.editingMember?state.members.map(old=>old.id===member.id?member:old):[...state.members,member]});state=next;const saved=save();$('member-dialog').close();renderAll();toast(saved?'Household name saved':'Household name kept in this tab; download a backup');}catch(problem){error('member-error',problem.message);}}
-  function showSettings(){error('backup-error','');$('checkin-enabled').checked=state.settings.checkinEnabled;$('checkin-time').value=state.settings.checkinTime;$('alerts-paused').checked=state.settings.remindersPaused;$('export-recovery').hidden=!ui.recoveryText;updateBrowserStatus();$('settings-dialog').showModal();}
+  function openMember(member=null){ui.editingMember=member?.id||null;ui.memberBaseline=member?copy(member):null;$('member-name').value=member?.name||'';error('member-error','');$('member-dialog').showModal();}
+  function saveMember(event){
+    event.preventDefault();error('member-error','');
+    try{
+      refreshSavedData();let member={id:ui.editingMember||id('person'),name:$('member-name').value.trim()};
+      if(ui.editingMember){
+        const previous=state.members.find(old=>old.id===member.id);member={...member,...mergeFields(ui.memberBaseline,previous,member,['name'])};const key=member.name.toLocaleLowerCase();
+        if(key!==previous?.name.trim().toLocaleLowerCase()&&state.members.some(old=>old.id!==member.id&&old.name.trim().toLocaleLowerCase()===key))throw Error('That household name already exists. Use a different name so assignments stay clear.');
+        state=C.validateSnapshot({...state,members:state.members.map(old=>old.id===member.id?member:old)});
+      }else C.createMember(state,member);
+      const saved=save();$('member-dialog').close();renderAll();toast(saved?'Household name saved':'Household name kept in this tab; download a backup');
+    }catch(problem){error('member-error',problem.message);}
+  }
+  function showSettings(){ui.settingsBaseline=copy(state.settings);error('backup-error','');$('checkin-enabled').checked=state.settings.checkinEnabled;$('checkin-time').value=state.settings.checkinTime;$('alerts-paused').checked=state.settings.remindersPaused;$('export-recovery').hidden=ui.recoveryText===null;updateBrowserStatus();$('settings-dialog').showModal();}
   function updateBrowserStatus(){const permission=window.Notification?.permission;$('browser-alert-status').textContent=!window.Notification?'Browser notifications are unavailable here; in-page alerts still work.':permission==='granted'?'Browser notifications are permitted while this demo is running.':permission==='denied'?'Browser notifications are blocked; in-page alerts still work.':'No notification permission requested. In-page alerts work while open.';$('enable-browser-alerts').disabled=!window.Notification||permission==='denied'||permission==='granted';}
   function checkReminders(){
     try{
+      if(refreshSavedData())renderAll();
       const due=C.dueReminders(state,Date.now()).filter(task=>!ui.unsavedDeliveries.has(task.id+':'+task.remindAt));let checkin=false,deliveryWarning=false;const date=C.today();
+      if(ui.todayDate!==date)renderAll();
       if(!state.settings.remindersPaused&&state.settings.checkinEnabled&&state.settings.checkinLastDate!==date&&ui.unsavedCheckin!==date&&Date.now()>=C.dueEpoch(date,state.settings.checkinTime)){checkin=true;try{state=C.validateSnapshot({...state,settings:{...state.settings,checkinLastDate:date}});}catch(_){ui.unsavedCheckin=date;deliveryWarning=true;}}
       if(!due.length&&!checkin)return;
       const content=$('alert-content');content.replaceChildren(el('strong',checkin?'Ready to review your day?':'A few things need attention.'));
@@ -234,8 +291,45 @@
     $('website-recovery-title').focus();
   }
   function showMeals(){showView('tools');$('meals-section').hidden=false;postMealRestore();$('meals-section').scrollIntoView({block:'start',behavior:'instant'});}
-  function postMeal(message){$('meals-frame').contentWindow?.postMessage(message,'*');}
-  function postMealRestore(){ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;renderToday();renderShopping();postMeal({type:'tidy-meals-restore',snapshot:state.mealSnapshot});postMeal({type:'tidy-meals-storage-status',saved:!ui.saveFailed&&!ui.storageLocked});}
+  function postMeal(message){$('meals-frame').contentWindow?.postMessage(message,location.origin);}
+  function trackMealEdits(){
+    const doc=$('meals-frame').contentDocument;if(!doc||doc===ui.mealDocument)return;
+    ui.mealDocument=doc;
+    for(const name of ['input','change','click','submit'])doc.addEventListener(name,()=>{ui.mealDirty=true;},true);
+  }
+  function postMealRestore(force=false){
+    trackMealEdits();if(!force&&(ui.mealDirty||ui.mealConflict))return;
+    if(force){ui.mealDirty=false;ui.mealConflict=false;}
+    ui.mealBaseSnapshot=copy(state.mealSnapshot);ui.mealRestoreExpected=copy(state.mealSnapshot);ui.mealRestorePending=true;
+    ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;renderToday();renderShopping();postMeal({type:'tidy-meals-restore',snapshot:state.mealSnapshot});postMeal({type:'tidy-meals-storage-status',saved:!ui.saveFailed&&!ui.storageLocked});
+  }
+  function acceptMealChange(message){
+    const wasRestoreEcho=ui.mealRestorePending&&!ui.mealDirty;
+    // Validate before accepting either a local change or a restoration echo.
+    C.validateSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});
+    refreshSavedData(false);
+    const latest=ui.savedMealSnapshot;
+    if(wasRestoreEcho&&(!same(latest,ui.mealRestoreExpected)&&!same(message.snapshot,latest)||ui.mealRestoreExpected!==null&&!same(message.snapshot,ui.mealRestoreExpected))){
+      // A delayed echo belongs to an older restore. Ask the frame for the
+      // current saved meal, without writing an old task or meal snapshot back.
+      ui.mealRestorePending=false;postMealRestore();return;
+    }
+    const conflict=ui.mealConflict||!same(latest,ui.mealBaseSnapshot)&&!same(latest,message.snapshot);
+    state=C.validateSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});ui.mealVerified=true;readMealGroceries(message);
+    if(conflict){
+      ui.mealDirty=true;ui.mealConflict=true;ui.saveFailed=true;ui.mealRestorePending=false;mealConflictWarning();postMeal({type:'tidy-meals-storage-status',saved:false});renderToday();renderShopping();return;
+    }
+    // Matching restores are acknowledgements, not new mutations. Avoid a
+    // storage/restore/save echo between tabs and retain any unsaved task data.
+    const unchanged=same(message.snapshot,latest)&&same(message.summary,ui.savedMealSummary);
+    const saved=unchanged?!ui.saveFailed&&!ui.storageLocked:save();
+    ui.mealRestorePending=false;
+    if(saved){ui.mealBaseSnapshot=copy(message.snapshot);ui.mealDirty=false;}
+    else ui.mealDirty=true;
+    postMeal({type:'tidy-meals-storage-status',saved});
+    if(saved&&message.snapshot===null&&typeof message.resetId==='string'&&message.resetId.length>0&&message.resetId.length<=100)postMeal({type:'tidy-meals-reset-ack',resetId:message.resetId,saved:true});
+    renderToday();renderShopping();
+  }
   function validateMealBackup(snapshot){
     if(snapshot===null)return Promise.resolve();
     return new Promise((resolve,reject)=>{const requestId=id('validate'),timeout=setTimeout(()=>{ui.mealRequests.delete(requestId);reject(Error('The meal planner could not validate this backup yet. Wait for it to load, then try again.'));},5000);ui.mealRequests.set(requestId,{resolve:()=>{clearTimeout(timeout);resolve();},reject:message=>{clearTimeout(timeout);reject(Error(message||'Invalid meal data in the backup.'));}});postMeal({type:'tidy-meals-validate',requestId,snapshot});});
@@ -246,7 +340,7 @@
       if(file.size>1024*1024)throw Error('The backup is too large. Maximum size is 1 MiB.');
       const candidate=C.parseBackup(await file.text());await validateMealBackup(candidate.mealSnapshot);
       if(!confirm(`Replace this browser's Tidy data with ${candidate.tasks.length} tasks and ${candidate.members.length} household names from the backup? Download a backup first if you want to keep the current data.`))return;
-      state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;const saved=save();renderAll();if(state.mealSnapshot===null)postMeal({type:'tidy-meals-reset'});else postMealRestore();
+      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
       toast('Backup restored'+(saved?'':' · in this tab only'));
     }catch(problem){error('backup-error',problem.message);}
     finally{event.target.value='';}
@@ -287,33 +381,34 @@
   for(const field of [$('task-search'),$('category-filter'),$('person-filter'),$('status-filter')])field.addEventListener('input',renderFamily);$('today-person').addEventListener('change',renderToday);
   $('add-member').addEventListener('click',()=>openMember());$('new-action').addEventListener('click',()=>openAction());
   $('open-settings').addEventListener('click',showSettings);$('edit-checkins').addEventListener('click',showSettings);
-  $('settings-form').addEventListener('submit',event=>{event.preventDefault();try{state=C.validateSnapshot({...state,settings:{...state.settings,checkinEnabled:$('checkin-enabled').checked,checkinTime:$('checkin-time').value,remindersPaused:$('alerts-paused').checked}});const saved=save();renderAll();toast(saved?'Alert preferences saved':'Preferences kept in this tab; download a backup');checkReminders();}catch(problem){toast(problem.message);}});
+  $('settings-form').addEventListener('submit',event=>{event.preventDefault();try{refreshSavedData();const draft={checkinEnabled:$('checkin-enabled').checked,checkinTime:$('checkin-time').value,remindersPaused:$('alerts-paused').checked},merged=mergeFields(ui.settingsBaseline,state.settings,draft,Object.keys(draft));state=C.validateSnapshot({...state,settings:{...state.settings,...merged}});const saved=save();if(saved){ui.settingsBaseline=copy(state.settings);$('checkin-enabled').checked=state.settings.checkinEnabled;$('checkin-time').value=state.settings.checkinTime;$('alerts-paused').checked=state.settings.remindersPaused;}renderAll();toast(saved?'Alert preferences saved':'Preferences kept in this tab; download a backup');checkReminders();}catch(problem){toast(problem.message);}});
   $('pause-alerts').addEventListener('click',()=>{mutate(()=>{state.settings.remindersPaused=!state.settings.remindersPaused;},state.settings.remindersPaused?'Alerts resumed':'Alerts paused');checkReminders();});
   $('enable-browser-alerts').addEventListener('click',async()=>{try{await Notification.requestPermission();updateBrowserStatus();}catch(_){$('browser-alert-status').textContent='This browser could not request permission. In-page alerts still work.';}});
   $('dismiss-alert').addEventListener('click',()=>{$('alert-banner').hidden=true;});
   $('export-backup').addEventListener('click',()=>{try{download('Tidy-backup-'+C.today()+'.json',C.backupJSON(state));}catch(problem){error('backup-error',problem.message);}});
-  $('export-recovery').addEventListener('click',()=>{if(ui.recoveryText)download('Tidy-saved-data-for-recovery.json',ui.recoveryText);});$('import-backup').addEventListener('change',importBackup);
-  $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',showMeals);$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;});$('show-requests').addEventListener('click',()=>{$('requests-card').scrollIntoView({block:'start'});});
+  $('export-recovery').addEventListener('click',()=>{if(ui.recoveryText!==null)download('Tidy-saved-data-for-recovery.json',ui.recoveryText);});$('import-backup').addEventListener('change',importBackup);
+  $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',showMeals);$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});$('show-requests').addEventListener('click',()=>{$('requests-card').scrollIntoView({block:'start'});});
   $('shopping-meals').addEventListener('click',showMeals);$('download-shopping').addEventListener('click',downloadShopping);
   for(const [key,store] of Object.entries(GROCERY_STORES))$('shopping-store-links').append(button('Open '+key,()=>openWebsite(store.url,store.name)));
   for(const [name,url] of [['Amazon UAE','https://www.amazon.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Waitrose UAE','https://www.waitrose.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
   window.addEventListener('message',event=>{
-    if(event.source!==$('meals-frame').contentWindow||!event.data||typeof event.data!=='object')return;
+    if(event.source!==$('meals-frame').contentWindow||event.origin!==location.origin||!event.data||typeof event.data!=='object')return;
     const message=event.data;
     if(message.type==='tidy-meals-open-store'){if(typeof message.store==='string'&&Object.hasOwn(GROCERY_STORES,message.store)){const store=GROCERY_STORES[message.store];openWebsite(store.url,store.name);}}
-    else if(message.type==='tidy-meals-ready'){ui.mealReady=true;postMealRestore();}
+    else if(message.type==='tidy-meals-ready'){ui.mealReady=true;trackMealEdits();postMealRestore();}
     else if(message.type==='tidy-meals-height'&&Number.isFinite(message.height))$('meals-frame').style.height=Math.max(400,Math.min(10000,Math.ceil(message.height)))+'px';
     else if(message.type==='tidy-meals-change'){
-      try{const next=C.validateSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});state=next;ui.mealVerified=true;readMealGroceries(message);const saved=save();postMeal({type:'tidy-meals-storage-status',saved});if(message.snapshot===null&&typeof message.resetId==='string'&&message.resetId.length>0&&message.resetId.length<=100)postMeal({type:'tidy-meals-reset-ack',resetId:message.resetId,saved});renderToday();renderShopping();}
+      try{acceptMealChange(message);}
       catch(problem){postMeal({type:'tidy-meals-storage-status',saved:false});toast(problem.message);}
     }else if(message.type==='tidy-meals-restored'){
+      if(message.message==='Current edits kept.')ui.mealDirty=true;
       ui.mealVerified=message.valid===true;if(ui.mealVerified){try{state=C.validateSnapshot({...state,mealSummary:message.summary});readMealGroceries(message);}catch(_){ui.mealVerified=false;}}if(!ui.mealVerified){ui.mealGroceries=[];ui.groceriesApproved=false;toast('The saved meal plan needs recovery. Open the meal planner to review it.');}renderToday();renderShopping();
     }else if(message.type==='tidy-meals-validation-result'){
       const request=ui.mealRequests.get(message.requestId);if(!request)return;ui.mealRequests.delete(message.requestId);message.valid===true?request.resolve():request.reject(message.message);
     }
   });
-  $('meals-frame').addEventListener('load',()=>{ui.mealReady=true;postMealRestore();});
-  window.addEventListener('storage',event=>{if(event.key!==KEY||!event.newValue)return;try{state=C.parseBackup(event.newValue);renderAll();postMealRestore();toast('Saved data updated from another tab on this browser.');}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
+  $('meals-frame').addEventListener('load',()=>{ui.mealReady=true;trackMealEdits();postMealRestore();});
+  window.addEventListener('storage',event=>{if(event.key!==KEY&&event.key!==null)return;try{if(refreshSavedData()){renderAll();toast('Saved data updated from another tab on this browser.');}}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
   setupVoice();showView(location.hash.slice(1)||'today',false);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});

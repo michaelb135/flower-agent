@@ -32,6 +32,15 @@
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > 8640000000000000) fail('Invalid ' + label + '.');
     return value;
   }
+  function reminderEpoch(value, label) {
+    epoch(value, label);
+    const year = new Date(value + DUBAI_OFFSET).getUTCFullYear();
+    // Reminders must fit the same four-digit Dubai calendar dates that the
+    // task editor supports. A valid JavaScript epoch can still overflow after
+    // applying Dubai's offset, or produce a year the editor cannot represent.
+    if (!Number.isInteger(year) || year < 1 || year > 9999) fail('Invalid ' + label + '; use a Dubai date from years 0001 to 9999.');
+    return value;
+  }
   function bool(value, fallback, label) {
     if (value === undefined) return fallback;
     if (typeof value !== 'boolean') fail(label + ' must be true or false.');
@@ -120,8 +129,8 @@
       assigneeId: input.assigneeId === undefined || input.assigneeId === null ? null : string(input.assigneeId, '', 120, 'Assignee ID', true),
       dueDate: date(input.dueDate, 'due date', true),
       dueTime: time(input.dueTime, 'due time', true),
-      remindAt: input.remindAt === undefined || input.remindAt === null ? null : epoch(input.remindAt, 'reminder time'),
-      deliveredReminderAt: input.deliveredReminderAt === undefined || input.deliveredReminderAt === null ? null : epoch(input.deliveredReminderAt, 'delivered reminder time'),
+      remindAt: input.remindAt === undefined || input.remindAt === null ? null : reminderEpoch(input.remindAt, 'reminder time'),
+      deliveredReminderAt: input.deliveredReminderAt === undefined || input.deliveredReminderAt === null ? null : reminderEpoch(input.deliveredReminderAt, 'delivered reminder time'),
       priority: choice(input.priority, 'normal', ['normal', 'high'], 'task priority'),
       type: choice(input.type, 'task', ['task', 'appointment', 'grocery'], 'task type'),
       quantity: string(input.quantity, '', 120, 'Quantity'),
@@ -228,6 +237,20 @@
     if (!task) fail('Task not found.');
     return task;
   }
+  function createMember(state, input, now = Date.now()) {
+    stateMembers(state); object(input, 'Family member'); epoch(now, 'current time');
+    if (state.members.length >= 30) fail('The household limit of 30 names has been reached.');
+    const member = {
+      id: input.id === undefined ? makeId(state.members, now, 'person') : string(input.id, undefined, 120, 'Member ID', true),
+      name: string(input.name, undefined, 120, 'Member name', true)
+    };
+    if (state.members.some(item => item.name.trim().toLowerCase() === member.name.toLowerCase())) fail('That household name already exists. Choose a different name so assignments are clear.');
+    // Existing or imported duplicate names remain readable. Uniqueness applies
+    // only to adding a new name, and the whole candidate is checked first.
+    validateSnapshot({ ...state, members: [...state.members, member] });
+    state.members.push(member);
+    return member;
+  }
   function createTask(state, input, now = Date.now()) {
     const memberIds = stateMembers(state);
     object(input, 'Task'); epoch(now, 'current time');
@@ -305,6 +328,17 @@
     // An existing future occurrence stays intact; completing again deduplicates it.
     return task;
   }
+  function stopRepeating(state, id) {
+    const task = findTask(state, id);
+    const seriesId = task.seriesId || task.id;
+    const belongsToSeries = item => item.id === seriesId || item.id === task.id || item.seriesId === seriesId;
+    const tasks = state.tasks.map(item => belongsToSeries(item) ? { ...item, repeat: 'none' } : item);
+    validateSnapshot({ ...state, tasks });
+    // Historical occurrences must also stop: reopening an old completed item
+    // must not silently start the stopped routine again.
+    for (const item of state.tasks) if (belongsToSeries(item)) item.repeat = 'none';
+    return task;
+  }
   function deleteTask(state, id) {
     const task = findTask(state, id);
     state.tasks.splice(state.tasks.indexOf(task), 1);
@@ -335,6 +369,20 @@
     catch (_) { fail('Tidy could not save locally. Storage may be full or unavailable; export a backup.'); }
     return true;
   }
+  function persistIfUnchanged(storage, state, expectedText, key = 'tidy.app.v1') {
+    if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') fail('Local saving is unavailable. Export a backup before closing Tidy.');
+    const text = backupJSON(state);
+    let current;
+    try { current = storage.getItem(key); } catch (_) { fail('Tidy could not read local storage. Export a backup before closing.'); }
+    if (current !== expectedText) {
+      const problem = new Error('Another tab changed the saved data. Your changes remain in this tab; export a backup before closing.');
+      problem.code = 'TIDY_STORAGE_CONFLICT';
+      throw problem;
+    }
+    try { storage.setItem(key, text); }
+    catch (_) { fail('Tidy could not save locally. Storage may be full or unavailable; export a backup.'); }
+    return text;
+  }
   function load(storage, key = 'tidy.app.v1') {
     if (!storage || typeof storage.getItem !== 'function') fail('Local storage is unavailable.');
     let text;
@@ -343,7 +391,7 @@
     return parseBackup(text);
   }
 
-  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createTask, updateTask, completeTask, reopenTask, deleteTask, dueReminders, validateSnapshot, backupJSON, parseBackup, persist, load });
+  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createMember, createTask, updateTask, completeTask, reopenTask, stopRepeating, deleteTask, dueReminders, validateSnapshot, backupJSON, parseBackup, persist, persistIfUnchanged, load });
   root.TidyCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

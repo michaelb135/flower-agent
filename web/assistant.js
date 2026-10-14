@@ -125,8 +125,26 @@
         problems.push('Please specify an unambiguous time, such as 3 pm or 15:00.');
       }
     }
-    if (/\b(?:GMT|UTC|EST|EDT|PST|PDT|BST|CET|London time|New York time)\b/i.test(text)) {
+    // A foreign clock label is a request to convert time, which this local
+    // helper cannot do. Also catch named zones next to a clock reading instead
+    // of interpreting the time as Dubai and leaving the zone in the title.
+    const foreignClockLabel = timeSpans.some(([, end]) => {
+      const label = text.slice(end).match(/^\s*(?:in\s+)?([\p{L}][\p{L}.'-]*(?:\s+[\p{L}][\p{L}.'-]*){0,2})\s+time\b/iu);
+      return label && !/^Dubai$/i.test(label[1]);
+    });
+    const foreignZone = foreignClockLabel || /\b(?:GMT|UTC|EST|EDT|PST|PDT|BST|CET|CEST|EET|EEST|IST|CST|CDT|MST|MDT|AEST|AEDT|JST|SGT|HKT|London time|New York time|Pacific time|Eastern time|Central time|Mountain time|India time|Indian time)\b/i.test(text) || /\b(?:Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/.test(text);
+    if (foreignZone) {
       problems.push('This demo uses Dubai time. Please enter the equivalent Dubai date and time.');
+    }
+    for (const match of text.matchAll(/\b(?:in\s+)?Dubai\s+time\b/gi)) remove(match);
+    // Lead times and approximate clock readings require a decision from the
+    // person entering them; keeping only the clock would schedule a wrong alert.
+    const duration = '(?:\\d+(?:\\.\\d+)?|one|two|three|an?|half(?:\\s+an?)?|a quarter(?:\\s+of\\s+an?)?)\\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)';
+    const offset = new RegExp(`\\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)\\s+(?:before|after|early|earlier|later|ahead(?:\\s+of)?)\\b|\\b(?:in|before|after)\\s+${duration}\\b`, 'i');
+    const approximateClock = timeSpans.some(([start]) => /\b(?:before|after|by|around|about)\s*$/i.test(text.slice(0, start)));
+    const unsupportedClock = timeSpans.length && (offset.test(text) || approximateClock);
+    if (unsupportedClock) {
+      problems.push('I cannot apply a reminder lead time or an approximate time yet. Please enter the exact reminder date and time in Dubai time.');
     }
     if (new Set(dates).size > 1) problems.push('I found different dates. Which single date should I use?');
     if (new Set(times).size > 1) problems.push('I found different times. Which single time should I use?');
@@ -138,7 +156,7 @@
       .replace(/\s+/g, ' ').replace(/^[\s,:;.]+|[\s,:;.!?]+$/g, '').trim();
     return {
       dueDate: new Set(dates).size === 1 ? dates[0] : '',
-      dueTime: new Set(times).size === 1 ? times[0] : '',
+      dueTime: !foreignZone && !unsupportedClock && new Set(times).size === 1 ? times[0] : '',
       repeat: new Set(repeats).size === 1 ? repeats[0] : 'none', title,
       problems: Array.from(new Set(problems))
     };
@@ -173,11 +191,19 @@
 
     const draft = baseDraft();
     let assignmentProblem = '';
+    const namedMembers = members.filter(member => member && typeof member.name === 'string' && member.name.trim());
+    const memberGroups = new Map();
+    for (const member of namedMembers) {
+      const name = member.name.trim().toLowerCase();
+      if (!memberGroups.has(name)) memberGroups.set(name, []);
+      memberGroups.get(name).push(member);
+    }
     const prefix = text.match(/^([^:]{1,60}):\s*(.+)$/);
     if (prefix && !/^(?:(?:add|create)\s+(?:a\s+)?)?(?:task|(?:work|home|school|shopping|health)(?:\s+task)?|grocer(?:y|ies)|shopping list|appointment|reminder)$/i.test(prefix[1].trim())) {
-      const person = members.find((member) => member && typeof member.name === 'string' && member.name.toLowerCase() === prefix[1].trim().toLowerCase());
-      if (person) {
-        draft.assigneeId = person.id;
+      const people = memberGroups.get(prefix[1].trim().toLowerCase()) || [];
+      if (people.length) {
+        if (people.length === 1) draft.assigneeId = people[0].id;
+        else assignmentProblem = `More than one family member has the name “${prefix[1].trim()}”. Choose which person is responsible.`;
         text = prefix[2];
       } else if (/^[\p{L}][\p{L} '-]*$/u.test(prefix[1])) {
         assignmentProblem = `“${prefix[1].trim()}” is not a known family member. Choose a member or leave this unassigned.`;
@@ -185,17 +211,22 @@
       }
     }
     const assignedNames = [];
-    for (const member of members) {
-      if (!member || typeof member.name !== 'string' || !member.name.trim()) continue;
-      const re = new RegExp(`\\b(?:assign(?:ed)? to)\\s+${escapeRE(member.name)}(?=$|[\\s,.!?])`, 'gi');
-      if (re.test(text)) {
-        assignedNames.push(member.id);
-        text = text.replace(re, '').trim();
-      }
+    // Prefer the complete longest name (for example Dad Junior before Dad),
+    // and inspect all people with that name before removing the phrase.
+    const names = [...memberGroups.keys()].sort((a, b) => b.length - a.length);
+    if (names.length) {
+      const re = new RegExp(`\\b(?:assign(?:ed)? to)\\s+(${names.map(escapeRE).join('|')})(?=$|[\\s,.!?])`, 'gi');
+      text = text.replace(re, (_, name) => {
+        const people = memberGroups.get(name.toLowerCase());
+        if (people.length === 1) assignedNames.push(people[0].id);
+        else assignmentProblem = `More than one family member has the name “${people[0].name}”. Choose which person is responsible.`;
+        return '';
+      }).trim();
     }
     if (new Set([draft.assigneeId, ...assignedNames].filter((id) => id !== null)).size > 1) assignmentProblem = 'Choose one person responsible for this task.';
     else if (assignedNames.length) draft.assigneeId = assignedNames[0];
     if (/\bassign(?:ed)? to\b/i.test(text)) assignmentProblem = 'Choose a known family member for the assignment.';
+    if (assignmentProblem) draft.assigneeId = null;
 
     const reminderRE = /^(?:please\s+)?(?:remind\s+(?:me|us)|(?:set|create|add|schedule)\s+(?:a\s+)?reminder(?:\s+for\s+(?:me|us))?)(?:\s+(?:to|about))?\s*:?\s*/i;
     const isReminder = reminderRE.test(text);
@@ -259,7 +290,7 @@
     Object.assign(draft, {
       title: when.title, dueDate: when.dueDate, dueTime: when.dueTime, repeat: when.repeat
     });
-    const quantity = draft.type === 'grocery' && draft.title.match(/^(\d+(?:\.\d+)?\s*(?:kg|g|l|ml|packs?|bottles?|boxes?)?)\s+(.+)$/i);
+    const quantity = draft.type === 'grocery' && draft.title.match(/^(\d+(?:\.\d+)?\s*(?:kg|g|l|ml|packs?|bottles?|boxes?)?)\s+(?:of\s+)?(.+)$/i);
     if (quantity) {
       draft.quantity = quantity[1];
       draft.title = quantity[2];

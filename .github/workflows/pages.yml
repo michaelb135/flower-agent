@@ -23,6 +23,8 @@ jobs:
           node --check web/assistant.js
           node --check web/app.js
           node --test tests/core.test.cjs tests/assistant.test.cjs
+          python3 tools/check_inline_scripts.py web/index.html web/meals.html
+          python3 -m unittest discover -s tests -p 'test_inline_scripts.py'
       - name: Build reviewed website files
         run: python3 tools/build_site.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/tidy-site"
       - name: Upload website

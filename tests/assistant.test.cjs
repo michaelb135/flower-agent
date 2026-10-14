@@ -183,3 +183,81 @@ test('hostile strings are inert; unsupported requests never execute', () => {
   assert.equal(parse(null).kind, 'clarify');
   assert.equal(parse('').kind, 'clarify');
 });
+
+test('foreign timezone labels cannot silently become Dubai reminders', () => {
+  for (const text of [
+    'Remind me to call tomorrow at 3 pm Pacific time',
+    'Remind me to call tomorrow at 3 pm India time',
+    'Remind me to call tomorrow at 3 pm in Berlin time',
+    'Remind me to call tomorrow at 3 pm IST',
+    'Remind me to call tomorrow at 3 pm Asia/Kolkata',
+    'Remind me to call tomorrow at 3 pm UTC',
+    'Remind me to call tomorrow at 3 pm GMT'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.match(result.message, /Dubai/, text);
+  }
+  const dubai = parse('Remind me to call tomorrow at 3 pm Dubai time');
+  assert.equal(dubai.kind, 'task');
+  assert.equal(dubai.draft.remindAt, Date.parse('2026-10-13T15:00:00+04:00'));
+  assert.equal(dubai.draft.title, 'call');
+  assert.equal(parse('Remind me to call tomorrow at 3 pm in Dubai time').draft.title, 'call');
+  assert.equal(parse('Remind me to have family time tomorrow at 3 pm').kind, 'task');
+});
+
+test('unsupported reminder offsets and approximate times ask rather than drop instructions', () => {
+  for (const text of [
+    'Remind me to call tomorrow at 3 pm 30 minutes before',
+    'Remind me to call tomorrow at 3 pm half an hour before',
+    'Remind me to call tomorrow at 3 pm fifteen minutes before',
+    'Remind me to call tomorrow at 3 pm 15 mins early',
+    'Remind me to call tomorrow at 3 pm 1 hour after',
+    'Remind me to call tomorrow before 3 pm',
+    'Remind me to call tomorrow around 3 pm'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.match(result.message, /Dubai/, text);
+  }
+  const exact = parse('Remind me to spend 30 minutes with family tomorrow at 3 pm');
+  assert.equal(exact.kind, 'task');
+  assert.equal(exact.draft.title, 'spend 30 minutes with family');
+  assert.equal(exact.draft.dueTime, '15:00');
+  assert.equal(parse('Remind me to call tomorrow at 3:30 pm').draft.dueTime, '15:30');
+});
+
+test('natural grocery quantities keep the canonical item name for deduplication', () => {
+  for (const text of ['We need 2 bottles of milk', 'Add 2 bottles of milk to the shopping list']) {
+    const result = parse(text);
+    assert.equal(result.kind, 'grocery');
+    assert.equal(result.draft.quantity, '2 bottles');
+    assert.equal(result.draft.title, 'milk');
+  }
+  assert.equal(parse('We need 2 bottles milk').draft.title, 'milk');
+  assert.equal(parse('We need 1 kg of rice').draft.title, 'rice');
+  assert.equal(parse('Add 2 packs of tissues to the shopping list').draft.title, 'tissues');
+});
+
+test('duplicate member names ask which person instead of choosing the first', () => {
+  const members = [
+    { id: 'dad', name: 'Dad' }, { id: 'second-dad', name: 'Dad' },
+    { id: 'mum', name: 'Mum' }, { id: 'dad-junior', name: 'Dad Junior' }
+  ];
+  for (const text of ['Dad: pick up kids tomorrow', 'Add task: pick up kids tomorrow assigned to Dad']) {
+    const result = parse(text, { members });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.draft.assigneeId, null, text);
+    assert.ok(result.missing.includes('assigneeId'), text);
+    assert.match(result.message, /more than one|same name|which/i, text);
+  }
+  assert.equal(parse('Mum: pick up kids tomorrow', { members }).draft.assigneeId, 'mum');
+  assert.equal(parse('Add task: pick up kids tomorrow assigned to Dad Junior', { members }).draft.assigneeId, 'dad-junior');
+  assert.equal(parse('Dad Junior: pick up kids tomorrow', { members }).draft.assigneeId, 'dad-junior');
+});
