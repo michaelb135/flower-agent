@@ -9,6 +9,8 @@
   const CATEGORIES = ['Work', 'Home', 'School', 'Shopping', 'Health'];
   const REPEATS = ['none', 'daily', 'weekly', 'weekdays'];
   const ACTION_STATUSES = ['needs_review', 'approved_draft', 'cancelled', 'manually_completed'];
+  const MEAL_PLAN_TYPES = ['breakfast', 'lunch'];
+  const MEAL_PLAN_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   let sequence = 0;
 
   function fail(message) { throw new Error(message); }
@@ -197,6 +199,22 @@
     if (bytes(JSON.stringify(result)) > MEAL_LIMIT) fail('Meal data exceeds the 256 KiB limit.');
     return result;
   }
+  function cleanMealPlans(value) {
+    function ordinary(input, label) {
+      object(input, label);
+      const prototype = Object.getPrototypeOf(input);
+      if (prototype !== Object.prototype && prototype !== null) fail(label + ' must be an ordinary object.');
+      return input;
+    }
+    ordinary(value, 'Meal plans');
+    const result = {};
+    for (const type of MEAL_PLAN_TYPES) {
+      const plan = value[type] === undefined ? {} : ordinary(value[type], 'Meal plan');
+      result[type] = {};
+      for (const day of MEAL_PLAN_DAYS) result[type][day] = string(plan[day], '', 300, 'Meal name');
+    }
+    return result;
+  }
   function validateSnapshot(data) {
     object(data, 'Backup');
     if (data.schemaVersion !== 1) fail('Unsupported backup version.');
@@ -224,8 +242,22 @@
       return { day: string(meal.day, '', 20, 'Meal day', true), name: string(meal.name, '', 120, 'Meal name', true) };
     });
     const result = { schemaVersion: 1, members, tasks, actions, settings, mealSnapshot: cleanMealSnapshot(data.mealSnapshot), mealSummary };
+    // Keep old backups byte-for-byte stable: manual breakfast/lunch plans are
+    // optional until someone saves one, rather than expanding every old state.
+    if (data.mealPlans !== undefined) result.mealPlans = cleanMealPlans(data.mealPlans);
     if (bytes(JSON.stringify(result)) > BACKUP_LIMIT) fail('Backup exceeds the 1 MiB limit.');
     return result;
+  }
+  function updateMealPlan(state, type, values) {
+    object(state, 'State');
+    choice(type, undefined, MEAL_PLAN_TYPES, 'meal plan type');
+    object(values, 'Meal plan');
+    // Validate the whole candidate before assigning anything: an invalid name
+    // or a full backup must leave all existing responsibilities recoverable.
+    const mealPlans = cleanMealPlans({ ...(state.mealPlans === undefined ? {} : cleanMealPlans(state.mealPlans)), [type]: values });
+    const candidate = validateSnapshot({ ...state, mealPlans });
+    state.mealPlans = candidate.mealPlans;
+    return state.mealPlans[type];
   }
   function stateMembers(state) {
     object(state, 'State');
@@ -392,7 +424,7 @@
     return parseBackup(text);
   }
 
-  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createMember, createTask, updateTask, completeTask, reopenTask, stopRepeating, deleteTask, dueReminders, validateSnapshot, backupJSON, parseBackup, persist, persistIfUnchanged, load });
+  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createMember, createTask, updateTask, completeTask, reopenTask, stopRepeating, deleteTask, dueReminders, updateMealPlan, validateSnapshot, backupJSON, parseBackup, persist, persistIfUnchanged, load });
   root.TidyCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

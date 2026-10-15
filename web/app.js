@@ -6,7 +6,8 @@
   const $=id=>document.getElementById(id);
   const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
-  Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null});
+  Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
+  const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
   function button(text,handler,cls='button secondary small'){const node=el('button',text,cls);node.type='button';node.addEventListener('click',handler);return node;}
   function error(id,text){$(id).textContent=text;$(id).hidden=!text;}
@@ -73,12 +74,13 @@
     catch(problem){state=previous;renderAll();toast(problem.message+' The previous data was kept.');return false;}
   }
   function showView(view,focus=true){
-    if(!['today','assistant','family','routines','tools','reminders','appointments'].includes(view))view='today';
+    const parts=view.split('/');view=parts[0];if(view==='meals'&&MEAL_SLIDES.includes(parts[1]))ui.mealSlide=parts[1];
+    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming'].includes(view))view='today';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
-    const parentView=view==='reminders'?'routines':view==='appointments'?'family':view;
+    const parentView=['today','assistant','family','reminders','tools'].includes(view)?view:'tools';
     for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===parentView)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
-    history.replaceState(null,'','#'+view);renderAll();
+    history.replaceState(null,'','#'+view+(view==='meals'?'/'+ui.mealSlide:''));renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
   }
   function populatePeople(select,first='All household',firstValue='all'){
@@ -116,14 +118,11 @@
     $('today-date').textContent=new Intl.DateTimeFormat('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:'Asia/Dubai'}).format(new Date())+' · Dubai time';
     const stats=$('today-stats');stats.replaceChildren();for(const [count,label] of [[open.filter(task=>task.dueDate===date).length,'Due today'],[open.filter(task=>task.dueDate&&task.dueDate<date).length,'Unfinished'],[state.actions.filter(action=>action.status==='needs_review').length,'Drafts to review']]){const card=el('div',undefined,'stat');card.append(el('strong',String(count)),el('span',label));stats.append(card);}
     taskList('today-tasks',visible.filter(task=>task.dueDate&&task.dueDate<=date),'Nothing dated needs attention. Add a task when you need one.');
-    taskList('inbox-tasks',visible.filter(task=>!task.dueDate),'Your undated list is clear.');
-    taskList('upcoming-tasks',sorted(visible.filter(task=>task.dueDate>date)).slice(0,5),'No upcoming items entered yet.',true);
+    taskList('inbox-tasks',open.filter(task=>!task.dueDate),'Your undated list is clear.');
+    taskList('upcoming-tasks',open.filter(task=>task.dueDate>date),'No upcoming items entered yet.');
     const times=new Map();for(const task of visible.filter(task=>task.dueDate===date&&task.dueTime)){times.set(task.dueTime,(times.get(task.dueTime)||0)+1);}
     $('today-conflicts').textContent=[...times].filter(([,count])=>count>1).map(([time,count])=>`${count} items share ${time}; check their timing.`).join(' ');
     const meal=ui.mealVerified?state.mealSummary.find(meal=>meal.day===weekday(date)):null;$('today-meal').replaceChildren(el('p',meal?meal.name:'No approved dinner plan for today.'));if(meal)$('today-meal').append(el('p','From your approved weekday menu.','helper'));
-    const requests=state.actions.filter(action=>action.status==='needs_review');$('today-actions').replaceChildren();
-    for(const action of requests.slice(0,3))$('today-actions').append(button(action.title,()=>{showView('tools');$('requests-card').scrollIntoView({block:'start'});}));
-    if(!requests.length)$('today-actions').append(el('p','No requests awaiting review.','helper'));
   }
   function renderFamily(){
     $('member-list').replaceChildren();for(const member of state.members){const assigned=state.tasks.filter(task=>task.status==='open'&&task.assigneeId===member.id).length;$('member-list').append(button(`${member.name} · ${assigned} open`,()=>openMember(member),'member-button'));}
@@ -220,7 +219,36 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();
+  }
+  function mealValues(type){return Object.fromEntries(MEAL_DAYS.map(day=>[day,state.mealPlans?.[type]?.[day]||'']));}
+  function selectMealSlide(type,focus=false){
+    if(!MEAL_SLIDES.includes(type))return;ui.mealSlide=type;
+    for(const kind of MEAL_SLIDES){const selected=kind===type,tab=$('meal-tab-'+kind);$('meal-slide-'+kind).hidden=!selected;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;}
+    const index=MEAL_SLIDES.indexOf(type);$('meal-previous').disabled=index===0;$('meal-next').disabled=index===MEAL_SLIDES.length-1;
+    $('meal-slide-status').textContent=type[0].toUpperCase()+type.slice(1)+' · '+(index+1)+' of '+MEAL_SLIDES.length;
+    if(ui.view==='meals')history.replaceState(null,'','#meals/'+type);
+    if(focus)$('meal-tab-'+type).focus();
+  }
+  function renderMealPlans(){
+    for(const type of ['breakfast','lunch']){
+      const values=mealValues(type);
+      if(!ui.mealEdits[type]){for(const day of MEAL_DAYS)$(type+'-'+day.toLowerCase()).value=values[day];ui.mealBaselines[type]=copy(values);}
+      $(type+'-status').textContent=ui.saveFailed||ui.storageLocked?'Local saving needs attention. Download a backup before closing.':ui.mealStatuses[type]||(Object.values(values).some(Boolean)?'Your weekday choices are saved on this browser.':'Type your choices for the weekdays you want to plan.');
+    }
+    selectMealSlide(ui.mealSlide);
+  }
+  function beginMealPlanEdit(type){if(!ui.mealEdits[type])ui.mealEdits[type]={baseline:copy(ui.mealBaselines[type]||mealValues(type))};}
+  function saveMealPlan(event,type){
+    event.preventDefault();error(type+'-error','');
+    try{
+      refreshSavedData();const draft=Object.fromEntries(MEAL_DAYS.map(day=>[day,$(type+'-'+day.toLowerCase()).value]));
+      const merged=mergeFields(ui.mealEdits[type]?.baseline||ui.mealBaselines[type]||mealValues(type),mealValues(type),draft,MEAL_DAYS);
+      C.updateMealPlan(state,type,merged);const saved=save();
+      if(saved){ui.mealEdits[type]=null;ui.mealStatuses[type]=type[0].toUpperCase()+type.slice(1)+' plan saved on this browser.';}
+      else {ui.mealEdits[type]={baseline:copy(mealValues(type))};ui.mealStatuses[type]='Not saved locally. Your choices remain in this tab; download a backup before closing.';}
+      renderAll();
+    }catch(problem){beginMealPlanEdit(type);error(type+'-error',problem.message);ui.mealStatuses[type]='Your entered choices have not replaced the saved plan.';renderMealPlans();}
   }
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
   function renderActivity(){
@@ -234,14 +262,14 @@
   function startActivity(){ui.activity={status:'working',title:'Understanding your request',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();}
   function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
   function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
-  function destination(task){return task.type==='appointment'?'appointments':task.remindAt!==null?'reminders':task.type==='grocery'?'tools':'family';}
+  function destination(task){return task.type==='appointment'?'appointments':task.remindAt!==null?'reminders':task.type==='grocery'?'shopping':'family';}
   function readableTime(epoch){return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(epoch))+' Dubai time';}
   function revealActivityTarget(focusCard=false){
     const target=ui.activity?.target;if(!target)return;
     const item=state[target.kind==='action'?'actions':'tasks'].find(item=>item.id===target.id);
     if(!item){toast('This item is no longer in Tidy.');return;}
     ui.highlightTaskId=target.kind==='task'?item.id:null;ui.highlightActionId=target.kind==='action'?item.id:null;
-    const view=target.kind==='action'?(item.kind==='booking'?'appointments':'tools'):destination(item);
+    const view=target.kind==='action'?(item.kind==='booking'?'appointments':'requests'):destination(item);
     if(view==='family'){$('task-search').value='';$('category-filter').value='all';$('person-filter').value='all';$('status-filter').value='all';}
     showView(view);
     if(focusCard){const card=[...$('view-'+view).querySelectorAll(target.kind==='action'?'[data-action-id]':'[data-task-id]')].find(card=>(target.kind==='action'?card.dataset.actionId:card.dataset.taskId)===item.id);if(card){card.focus({preventScroll:true});card.scrollIntoView({block:'center',behavior:'instant'});}}
@@ -404,7 +432,7 @@
     $('website-report-problem').disabled=true;$('website-recovery').hidden=false;
     $('website-recovery-title').focus();
   }
-  function showMeals(){showView('tools');$('meals-section').hidden=false;postMealRestore();$('meals-section').scrollIntoView({block:'start',behavior:'instant'});}
+  function showMeals(){showView('meals/dinner');$('meals-section').hidden=false;postMealRestore();$('meals-section').scrollIntoView({block:'start',behavior:'instant'});}
   function postMeal(message){$('meals-frame').contentWindow?.postMessage(message,location.origin);}
   function trackMealEdits(){
     const doc=$('meals-frame').contentDocument;if(!doc||doc===ui.mealDocument)return;
@@ -454,7 +482,7 @@
       if(file.size>1024*1024)throw Error('The backup is too large. Maximum size is 1 MiB.');
       const candidate=C.parseBackup(await file.text());await validateMealBackup(candidate.mealSnapshot);
       if(!confirm(`Replace this browser's Tidy data with ${candidate.tasks.length} tasks and ${candidate.members.length} household names from the backup? Download a backup first if you want to keep the current data.`))return;
-      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
+      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;for(const type of ['breakfast','lunch']){ui.mealEdits[type]=null;ui.mealStatuses[type]='';}const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
       toast('Backup restored'+(saved?'':' · in this tab only'));
     }catch(problem){error('backup-error',problem.message);}
     finally{event.target.value='';}
@@ -480,6 +508,17 @@
   }
   startStorage();
   for(const nav of document.querySelectorAll('[data-view]'))nav.addEventListener('click',()=>showView(nav.dataset.view));
+  for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>showView(link.dataset.go));
+  for(const tab of document.querySelectorAll('button[data-meal]')){
+    tab.addEventListener('click',()=>selectMealSlide(tab.dataset.meal));
+    tab.addEventListener('keydown',event=>{const index=MEAL_SLIDES.indexOf(tab.dataset.meal);let next;if(event.key==='ArrowRight')next=(index+1)%MEAL_SLIDES.length;else if(event.key==='ArrowLeft')next=(index+MEAL_SLIDES.length-1)%MEAL_SLIDES.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=MEAL_SLIDES.length-1;else return;event.preventDefault();selectMealSlide(MEAL_SLIDES[next],true);});
+  }
+  $('meal-previous').addEventListener('click',()=>selectMealSlide(MEAL_SLIDES[Math.max(0,MEAL_SLIDES.indexOf(ui.mealSlide)-1)],true));
+  $('meal-next').addEventListener('click',()=>selectMealSlide(MEAL_SLIDES[Math.min(MEAL_SLIDES.length-1,MEAL_SLIDES.indexOf(ui.mealSlide)+1)],true));
+  for(const type of ['breakfast','lunch']){
+    $(type+'-form').addEventListener('submit',event=>saveMealPlan(event,type));
+    for(const day of MEAL_DAYS){const input=$(type+'-'+day.toLowerCase());input.addEventListener('focus',()=>beginMealPlanEdit(type));input.addEventListener('input',()=>{beginMealPlanEdit(type);ui.mealStatuses[type]='Your changes have not been saved yet.';error(type+'-error','');renderMealPlans();});}
+  }
   document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('today');});
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
@@ -510,9 +549,8 @@
   $('dismiss-alert').addEventListener('click',()=>{$('alert-banner').hidden=true;});
   $('export-backup').addEventListener('click',()=>{try{download('Tidy-backup-'+C.today()+'.json',C.backupJSON(state));}catch(problem){error('backup-error',problem.message);}});
   $('export-recovery').addEventListener('click',()=>{if(ui.recoveryText!==null)download('Tidy-saved-data-for-recovery.json',ui.recoveryText);});$('import-backup').addEventListener('change',importBackup);
-  $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',showMeals);$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});$('show-requests').addEventListener('click',()=>{$('requests-card').scrollIntoView({block:'start'});});
+  $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',()=>showView('meals'));$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});
   $('shopping-meals').addEventListener('click',showMeals);$('download-shopping').addEventListener('click',downloadShopping);
-  for(const [key,store] of Object.entries(GROCERY_STORES))$('shopping-store-links').append(button('Open '+key,()=>openWebsite(store.url,store.name)));
   for(const [name,url] of [['Waitrose UAE','https://www.waitrose.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Amazon UAE','https://www.amazon.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
   $('health-square-url').addEventListener('focus',beginHealthSquareEdit);
   $('health-square-url').addEventListener('input',()=>{beginHealthSquareEdit();error('health-square-error','');ui.healthSquareStatus='Website change not saved yet.';renderHealthSquare();});

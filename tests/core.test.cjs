@@ -424,3 +424,98 @@ test('conditional persistence rejects a changed stored snapshot without overwrit
   assert.equal(written, stored);
   assert.equal(Core.parseBackup(stored).tasks[0].title, 'Local responsibility');
 });
+
+test('legacy backups keep manual meal plans absent, including at the backup size boundary', () => {
+  const state = Core.defaults();
+  assert.equal(Object.hasOwn(state, 'mealPlans'), false);
+  const template = task(state, { id: 'template', notes: 'a'.repeat(8500) });
+  state.tasks = Array.from({ length: 119 }, (_, index) => ({ ...template, id: 'near-' + index }));
+  // Fill the remaining space with valid notes until the old backup is only
+  // twenty bytes below the limit: adding empty meal plans would break it.
+  let remaining = 1024 * 1024 - Buffer.byteLength(Core.backupJSON(state)) - 20;
+  for (const item of state.tasks) {
+    const extra = Math.min(10000 - item.notes.length, remaining);
+    item.notes += 'b'.repeat(extra);
+    remaining -= extra;
+    if (!remaining) break;
+  }
+  assert.equal(remaining, 0);
+  const backup = Core.backupJSON(state);
+  assert.equal(Buffer.byteLength(backup), 1024 * 1024 - 20);
+  const restored = Core.parseBackup(backup);
+  assert.equal(Object.hasOwn(restored, 'mealPlans'), false);
+  assert.equal(Core.backupJSON(restored), backup);
+  let saved;
+  Core.persist({ setItem: (_, text) => { saved = text; } }, restored);
+  assert.equal(saved, backup);
+});
+
+test('manual weekday meals trim names, preserve the other plan and round-trip without changing dinner or responsibilities', () => {
+  const state = Core.defaults();
+  task(state, { notes: 'Keep school books together', assigneeId: 'dad' });
+  state.actions.push({ id: 'review-booking', kind: 'booking', title: 'Clinic draft', details: '', provider: '', link: '', status: 'needs_review', createdAt: NOW });
+  state.settings.checkinEnabled = true;
+  state.mealSnapshot = { version: 4, state: { menu: [{ day: 'Monday', name: 'Roast chicken' }] } };
+  state.mealSummary = [{ day: 'Monday', name: 'Roast chicken' }];
+  const before = Core.backupJSON(state);
+  const breakfast = Core.updateMealPlan(state, 'breakfast', { Monday: '  Eggs and toast  ', Friday: 'Porridge', Saturday: 'Ignore extra day' });
+  assert.equal(breakfast, state.mealPlans.breakfast);
+  assert.deepEqual(breakfast, { Monday: 'Eggs and toast', Tuesday: '', Wednesday: '', Thursday: '', Friday: 'Porridge' });
+  Core.updateMealPlan(state, 'lunch', { Tuesday: 'Chicken sandwich', Wednesday: '寿司 🍱' });
+  assert.deepEqual(state.mealPlans.breakfast, breakfast);
+  assert.equal(state.mealPlans.lunch.Tuesday, 'Chicken sandwich');
+  const restored = Core.parseBackup(Core.backupJSON(state));
+  assert.deepEqual(restored, state);
+  delete restored.mealPlans;
+  assert.equal(Core.backupJSON(restored), before);
+  Core.updateMealPlan(state, 'breakfast', {});
+  assert.equal(state.mealPlans.breakfast.Monday, '');
+  assert.equal(state.mealPlans.lunch.Tuesday, 'Chicken sandwich');
+});
+
+test('invalid manual plans and malformed imported plan data leave existing state and storage unchanged', () => {
+  const state = Core.defaults();
+  Core.updateMealPlan(state, 'lunch', { Monday: 'Soup' });
+  const retained = state.mealPlans;
+  const before = Core.backupJSON(state);
+  let saved = before;
+  const storage = { getItem: () => saved, setItem: (_, text) => { saved = text; } };
+  for (const type of ['dinner', 'snack', '', null, undefined]) {
+    assert.throws(() => Core.updateMealPlan(state, type, { Monday: 'Toast' }), /meal plan type/);
+    assert.equal(state.mealPlans, retained);
+  }
+  for (const values of [null, undefined, [], new Date(), { Monday: 2 }, { Monday: null }, { Monday: [] }, { Friday: 'a'.repeat(301) }]) {
+    assert.throws(() => Core.updateMealPlan(state, 'breakfast', values));
+    assert.equal(state.mealPlans, retained);
+    assert.equal(Core.backupJSON(state), before);
+  }
+  for (const value of [null, [], new Date(), { breakfast: null }, { lunch: [] }, { breakfast: { Monday: false } }, { lunch: { Tuesday: 'a'.repeat(301) } }]) {
+    const candidate = { ...state, mealPlans: value };
+    assert.throws(() => Core.validateSnapshot(candidate));
+    assert.throws(() => Core.persistIfUnchanged(storage, candidate, before));
+    assert.equal(saved, before);
+    assert.equal(Core.backupJSON(state), before);
+  }
+  const cleaned = Core.validateSnapshot({ ...state, mealPlans: { breakfast: { Monday: 'Toast', unexpected: 'ignored' }, unknown: { Monday: 'ignored' } } });
+  assert.deepEqual(Object.keys(cleaned.mealPlans), ['breakfast', 'lunch']);
+  assert.deepEqual(Object.keys(cleaned.mealPlans.breakfast), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+});
+
+test('a manual plan that exceeds the whole-backup limit rejects before assigning any part of the plan', () => {
+  const state = Core.defaults();
+  const template = task(state, { id: 'template', notes: 'a'.repeat(8500) });
+  state.tasks = Array.from({ length: 119 }, (_, index) => ({ ...template, id: 'near-' + index }));
+  let remaining = 1024 * 1024 - Buffer.byteLength(Core.backupJSON(state)) - 20;
+  for (const item of state.tasks) {
+    const extra = Math.min(10000 - item.notes.length, remaining);
+    item.notes += 'b'.repeat(extra);
+    remaining -= extra;
+    if (!remaining) break;
+  }
+  const before = Core.backupJSON(state);
+  const retainedTasks = state.tasks;
+  assert.throws(() => Core.updateMealPlan(state, 'breakfast', { Monday: 'Toast' }), /1 MiB/);
+  assert.equal(Object.hasOwn(state, 'mealPlans'), false);
+  assert.equal(state.tasks, retainedTasks);
+  assert.equal(Core.backupJSON(state), before);
+});

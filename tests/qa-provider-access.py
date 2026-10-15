@@ -64,8 +64,13 @@ def main():
             tab.on("pageerror", lambda problem: errors.append(str(problem)))
             tab.goto(args.url)
             tab.wait_for_function("!!window.TidyDemo && TidyDemo.getState().mealSnapshot !== null")
-            tab.locator('[data-view="tools"]').click()
+            section(tab, "health")
             return tab
+
+        def section(tab, name):
+            tab.locator('[data-view="tools"]').click()
+            tab.locator(f'#view-tools [data-go="{name}"]').click()
+            tab.locator(f"#view-{name}").wait_for(state="visible")
 
         def saved(tab):
             return tab.evaluate("JSON.parse(localStorage.getItem('tidy.app.v1'))")
@@ -94,7 +99,7 @@ def main():
             assert saved(tab)["settings"]["healthSquareUrl"] == CLINIC
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
-            tab.locator('[data-view="tools"]').click()
+            section(tab, "health")
             assert tab.locator("#health-square-url").input_value() == CLINIC
             tab.locator("#health-square-open").click()
             assert tab.locator("#website-title").inner_text() == "Health Square"
@@ -150,11 +155,13 @@ def main():
             tab = page(fresh)
             for name in ["Amazon UAE", "Health Square"]:
                 if name == "Amazon UAE":
+                    section(tab, "stores")
                     tab.locator("#provider-list").get_by_role("button", name=name, exact=True).click()
                     assert tab.locator("#website-choice").is_visible()
                     assert tab.locator("#website-frame").get_attribute("src") == "about:blank"
                     tab.locator("#website-try-inside").click()
                 else:
+                    section(tab, "health")
                     configure(tab, CLINIC)
                     tab.locator("#health-square-open").click()
                 before = saved(tab)
@@ -174,7 +181,8 @@ def main():
         def narrow(fresh):
             tab = page(fresh)
             configure(tab, CLINIC)
-            assert tab.locator("#view-tools").evaluate("node=>node.scrollWidth<=node.clientWidth")
+            assert tab.locator("#view-health").evaluate("node=>node.scrollWidth<=node.clientWidth")
+            assert tab.locator("#provider-list").is_hidden()
             tab.locator("#health-square-open").click()
             tab.locator("#website-report-problem").click()
             assert tab.locator("#website-recovery").is_visible()

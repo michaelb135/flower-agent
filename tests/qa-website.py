@@ -1,9 +1,10 @@
 """Test Tidy's provider viewer with intercepted fixtures, never live retailer sessions.
 
-Run an internal server for web/ on port 8780 first. Results and screenshots are
-written outside web/. These checks establish Tidy's behavior, not compatibility
+Pass --url for the selected local or published Tidy site (default: port 8780).
+Results and screenshots are written outside web/. These checks establish Tidy's behavior, not compatibility
 with an actual retailer's login, security challenge, basket or checkout.
 """
+import argparse
 import copy
 import hashlib
 import json
@@ -17,7 +18,20 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 OUT = ROOT / ".qa-results"
 OUT.mkdir(exist_ok=True)
-URL = "http://127.0.0.1:8780/"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--url", default="http://127.0.0.1:8780/")
+args = parser.parse_args()
+URL = args.url
+
+
+def origin(url):
+    parsed = urlparse(url)
+    return parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+SELECTED_ORIGIN = origin(URL)
+if SELECTED_ORIGIN[0] not in {"http", "https"} or not SELECTED_ORIGIN[1]:
+    parser.error("--url must identify an HTTP(S) site")
 STORES = {
     "Amazon UAE": "https://www.amazon.ae/",
     "Kibsons": "https://www.kibsons.com/",
@@ -46,6 +60,9 @@ with sync_playwright() as playwright:
     context = browser.new_context(accept_downloads=True, viewport={"width": 1280, "height": 900})
 
     def mock_provider(route, request):
+        if origin(request.url) == SELECTED_ORIGIN:
+            route.continue_()
+            return
         host = urlparse(request.url).hostname
         if host not in fixture_mode:
             requests.append({"url": request.url, "scope": "unexpected-external", "mode": "blocked"})
@@ -71,7 +88,7 @@ with sync_playwright() as playwright:
             body = "<!doctype html><title>Mock retailer</title><h1>Intercepted provider fixture</h1>"
         route.fulfill(status=200, headers=headers, body=body)
 
-    context.route("https://**/*", mock_provider)
+    context.route("**/*", mock_provider)
     page = context.new_page()
     page.set_default_timeout(7000)
     page.on("pageerror", lambda error: browser_errors.append(str(error)))
@@ -83,8 +100,18 @@ with sync_playwright() as playwright:
     def tools():
         page.locator('[data-view="tools"]').click()
 
-    def open_store(name):
+    def section(name):
         tools()
+        page.locator(f'#view-tools [data-go="{name}"]').click()
+        page.locator(f"#view-{name}").wait_for(state="visible")
+
+    def open_meals():
+        section("meals")
+        page.locator('[data-meal="dinner"]').click()
+        page.locator("#show-meals").click()
+
+    def open_store(name):
+        section("stores")
         page.locator("#provider-list").get_by_role("button", name=name, exact=True).click()
         page.locator("#website-dialog").wait_for(state="visible")
 
@@ -112,8 +139,7 @@ with sync_playwright() as playwright:
         page.locator('[data-view="assistant"]').click()
         page.locator("#capture-text").fill("We need milk")
         page.locator("#capture-form button[type=submit]").click()
-        tools()
-        page.locator("#show-meals").click()
+        open_meals()
         f = page.frame_locator("#meals-frame")
         f.locator("#people").fill("4")
         f.locator("#diet").select_option("mixed")
@@ -134,8 +160,13 @@ with sync_playwright() as playwright:
 
     def four_destinations():
         tools()
+        assert page.locator("#view-tools #provider-list").count() == 0
+        assert page.locator("#view-tools #shopping-card").count() == 0
+        assert page.locator("#provider-list").is_hidden()
+        section("stores")
         assert page.locator("#provider-list button").count() == 4
-        assert page.locator("#provider-list").bounding_box()["y"] < page.locator(".tool-grid").bounding_box()["y"]
+        assert page.locator("#provider-list button").first.inner_text() == "Waitrose UAE"
+        assert page.locator("#shopping-card").is_hidden()
         for name, url in STORES.items():
             before = count_for(url)
             open_store(name)
@@ -275,7 +306,7 @@ with sync_playwright() as playwright:
     def source_and_store_checks():
         before = len(requests)
         assert not page.locator("#website-dialog").is_visible()
-        child = next(frame for frame in page.frames if frame.url.endswith("meals.html"))
+        child = next(frame for frame in page.frames if urlparse(frame.url).path.endswith("/meals.html"))
         for bad in ["Amazon", "Unknown shop", "__proto__", "https://example.invalid/"]:
             child.evaluate("store=>parent.postMessage({type:'tidy-meals-open-store',store},'*')", bad)
         page.evaluate("window.postMessage({type:'tidy-meals-open-store',store:'Carrefour'},'*')")
@@ -289,11 +320,11 @@ with sync_playwright() as playwright:
     def reload_preserves():
         page.reload()
         page.wait_for_function("window.TidyDemo && TidyDemo.getState().mealSnapshot?.state.draftApproved")
-        tools()
-        page.locator("#show-meals").click()
+        open_meals()
         f = page.frame_locator("#meals-frame")
         f.locator("#approval-result").wait_for(state="visible")
         preserved()
+        section("shopping")
         assert "milk" in page.locator("#shopping-tasks").inner_text().lower()
         assert "approved" in page.locator("#meal-shopping-status").inner_text().lower()
 
@@ -303,7 +334,7 @@ with sync_playwright() as playwright:
         fixture_mode[urlparse(STORES["Amazon UAE"]).hostname] = "challenge"
         for width in [320, 390]:
             page.set_viewport_size({"width": width, "height": 844})
-            tools()
+            section("stores")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
             for name in STORES:
                 control = page.locator("#provider-list").get_by_role("button", name=name, exact=True)
@@ -330,7 +361,7 @@ with sync_playwright() as playwright:
     run("No JavaScript exceptions or unmocked external requests", lambda: (_ for _ in ()).throw(AssertionError({"errors": browser_errors, "external": [item for item in requests if item["scope"] == "unexpected-external"]})) if browser_errors or any(item["scope"] == "unexpected-external" for item in requests) else None)
     browser.close()
 
-report = {"route": "Internal HTTP with intercepted HTTPS provider fixtures", "compatibility_scope": "Tests Tidy recovery behavior only. No live provider login, challenge, basket or checkout compatibility verified.", "source_sha256": {name: hashlib.sha256((WEB / name).read_bytes()).hexdigest() for name in ["index.html", "app.js", "styles.css", "meals.html"]}, "results": results, "browser_errors": browser_errors, "intercepted_requests": requests}
+report = {"url": URL, "route": "Selected Tidy HTTP(S) origin with intercepted provider fixtures", "compatibility_scope": "Tests Tidy recovery behavior only. No live provider login, challenge, basket or checkout compatibility verified.", "source_sha256": {name: hashlib.sha256((WEB / name).read_bytes()).hexdigest() for name in ["index.html", "app.js", "styles.css", "meals.html"]}, "results": results, "browser_errors": browser_errors, "intercepted_requests": requests}
 (OUT / "website-results.json").write_text(json.dumps(report, indent=2))
 print(json.dumps(report, indent=2))
 raise SystemExit(1 if any(item["result"] == "FAIL" for item in results) else 0)

@@ -260,13 +260,13 @@ def main():
 
         def groceries(tab):
             ask(tab, "We need milk", "done")
-            assert_destination(tab, "tools")
+            assert_destination(tab, "shopping")
             task, = saved(tab)["tasks"]
             assert task["type"] == "grocery" and task["title"] == "milk"
             row = record(tab, task["id"], "shopping-tasks")
             assert row.is_visible()
             ask(tab, "We need milk")
-            assert_destination(tab, "tools")
+            assert_destination(tab, "shopping")
             assert saved(tab)["tasks"] == [task]
             assert record(tab, task["id"], "shopping-tasks").is_visible()
             assert re.search(r"already|existing", tab.locator("#assistant-activity").inner_text(), re.I)
