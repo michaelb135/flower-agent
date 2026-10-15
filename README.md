@@ -4,6 +4,10 @@ A web app for household tasks, quick requests, assignments, routines, meal plann
 
 ## This change
 
+Ask Tidy now shows the steps it performs and opens the resulting reminder, appointment, grocery item or task. Clear local requests save automatically. Notification and alarm requests create browser reminders; an unclear time such as “6 o’clock” asks for the day and AM or PM before saving. The details form offers quick date/time choices, and the result stays highlighted on its destination screen.
+
+Entered appointments are local records. Requests to book, buy or send something become drafts awaiting review; preparing or approving a draft does not contact a provider. Failed local writes remain available in the current tab and backups, and the activity panel reports the failure. Browser reminders still need Tidy open and do not create alarms in the iPhone Clock app.
+
 The app audit fixes meal choices disappearing after preference edits, stale meal data returning after a reset, incorrect reminder interpretation, stopped routines restarting, extreme reminder timestamps breaking imported data, and stale tabs replacing newer edits. Meals keep pending preference edits for review; reminders ask when a requested time cannot be safely interpreted. Mobile pantry controls, keyboard focus and trusted meal-frame messaging are also checked.
 
 Waitrose UAE, Kibsons, Carrefour UAE and Amazon UAE appear together at the top of Tools. Waitrose occupies Amazon's previous position. Amazon first offers **Open Amazon in browser** or **Try inside Tidy**, without loading Amazon or launching another page automatically. The browser choice opens a separate page with no opener; Tidy and its saved lists remain available. Other store pages make one attempt inside Tidy. If a page or security check fails, **This page is not working** stops it and shows a clear recovery message. Direct opening and retry always require an explicit click; Tidy never automatically redirects, retries or reports a purchase completed.
@@ -31,6 +35,8 @@ For browser checks, serve `web/` internally on port 8780 and run `python tests/q
 Run `python3 tests/qa-concurrency.py --url http://127.0.0.1:8780/` against that server to check genuine same-browser storage events, independent editor changes, conflicting changes, unsaved-data recovery and meal restoration. Every scenario uses a fresh context and synthetic household data. The quota fixture simulates a failed storage write. These checks do not establish sharing between devices or authenticated family members.
 
 Run `python3 tests/qa-provider-access.py --url http://127.0.0.1:8780/` to check clinic address setup, persistence, URL validation, two-tab conflicts, provider popups and narrow-layout recovery. It uses intercepted provider pages and allows network requests only to the selected Tidy origin. It can also run against the confirmed published URL, with normal TLS verification. Synthetic clinic addresses in tests are not real clinic destinations.
+
+Run `python3 tests/qa-ask-tidy.py --url http://127.0.0.1:8780/` for actual Ask Tidy saves, progress and destination navigation, clarification, reminder delivery while open, review-only booking requests, duplicate grocery handling, storage failure recovery and phone-sized controls. It uses isolated synthetic data and blocks requests outside the selected Tidy origin. The same checks can run against the published HTTPS site with certificate verification enabled.
 
 `tools/build_site.py --revision <commit> --output <empty-directory>` builds the deployable files. Use `unpublished` for a local build check.
 

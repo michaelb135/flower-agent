@@ -6,6 +6,7 @@
   const $=id=>document.getElementById(id);
   const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
+  Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null});
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
   function button(text,handler,cls='button secondary small'){const node=el('button',text,cls);node.type='button';node.addEventListener('click',handler);return node;}
   function error(id,text){$(id).textContent=text;$(id).hidden=!text;}
@@ -72,10 +73,11 @@
     catch(problem){state=previous;renderAll();toast(problem.message+' The previous data was kept.');return false;}
   }
   function showView(view,focus=true){
-    if(!['today','assistant','family','routines','tools'].includes(view))view='today';
+    if(!['today','assistant','family','routines','tools','reminders','appointments'].includes(view))view='today';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
-    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===view)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
+    const parentView=view==='reminders'?'routines':view==='appointments'?'family':view;
+    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===parentView)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
     history.replaceState(null,'','#'+view);renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
   }
@@ -86,7 +88,7 @@
   }
   function sorted(tasks){return tasks.slice().sort((a,b)=>((a.dueDate||'9999')+(a.dueTime||'23:59')).localeCompare((b.dueDate||'9999')+(b.dueTime||'23:59'))||(a.priority==='high'?-1:0)-(b.priority==='high'?-1:0)||a.createdAt-b.createdAt);}
   function taskCard(task,compact=false){
-    const row=el('article',undefined,'task-row'+(task.status==='done'?' done':''));row.dataset.taskId=task.id;
+    const row=el('article',undefined,'task-row'+(task.status==='done'?' done':'')+(task.id===ui.highlightTaskId?' assistant-highlight':''));row.dataset.taskId=task.id;row.tabIndex=-1;
     const top=el('div',undefined,'task-top'),copy=el('div',undefined,'task-copy');copy.append(el('div',task.title,'task-title'));
     const metadata=el('div',undefined,'task-meta');metadata.append(el('span',task.category,'pill'),el('span',memberName(task.assigneeId),'pill neutral'));
     if(task.priority==='high')metadata.append(el('span','Important','pill warning'));
@@ -106,7 +108,7 @@
     if(!compact)actions.append(button('Remove',()=>{if(confirm('Remove this item from Tidy? This does not cancel anything with a provider.'))mutate(()=>C.deleteTask(state,task.id),'Removed from Tidy');},'button text small'));
     row.append(actions);return row;
   }
-  function taskList(id,tasks,none,compact=false){const target=$(id);target.replaceChildren();for(const task of sorted(tasks))target.append(taskCard(task,compact));if(!tasks.length)empty(target,none);}
+  function taskList(id,tasks,none,compact=false){const target=$(id);target.replaceChildren();const ordered=sorted(tasks);if(['reminder-tasks','appointment-tasks'].includes(id)){const index=ordered.findIndex(task=>task.id===ui.highlightTaskId);if(index>0)ordered.unshift(...ordered.splice(index,1));}for(const task of ordered)target.append(taskCard(task,compact));if(!tasks.length)empty(target,none);}
   function renderToday(){
     const date=C.today(),open=state.tasks.filter(task=>task.status==='open'),filter=$('today-person').value;
     ui.todayDate=date;
@@ -133,10 +135,8 @@
     $('pause-alerts').textContent=state.settings.remindersPaused?'Resume alerts':'Pause alerts';
     $('reminder-summary').textContent=state.settings.remindersPaused?'All demo alerts are paused.':`Task alerts are active while open. Daily check-in ${state.settings.checkinEnabled?'at '+state.settings.checkinTime+' Dubai time':'is turned off'}.`;
   }
-  function renderActions(){
-    const target=$('action-list');target.replaceChildren();
-    for(const action of state.actions.slice().reverse()){
-      const card=el('article',undefined,'request-card');card.dataset.actionId=action.id;card.append(el('h3',action.title));
+  function actionCard(action){
+      const card=el('article',undefined,'request-card'+(action.id===ui.highlightActionId?' assistant-highlight':''));card.dataset.actionId=action.id;card.tabIndex=-1;card.append(el('h3',action.title));
       const labels={needs_review:'Needs your review',approved_draft:'Draft approved · finish with provider',cancelled:'Draft discarded',manually_completed:'You marked it completed manually'};
       card.append(el('span',labels[action.status],'pill'+(action.status==='needs_review'?' warning':' neutral')));
       card.append(el('p',`${action.kind==='purchase'?'Purchase':action.kind==='booking'?'Booking':'Message'}${action.provider?' · '+action.provider:''}`,'helper'));
@@ -147,9 +147,22 @@
       if(action.link)actions.append(button('View website',()=>openWebsite(action.link,action.provider||action.title)));
       if(action.status==='approved_draft')actions.append(button('I completed it outside Tidy',()=>{if(confirm('Have you completed this yourself? Tidy cannot verify it with the provider.'))mutate(()=>changeActionStatus(action,'manually_completed'),'Recorded your manual completion');}));
       if(!['cancelled','manually_completed'].includes(action.status))actions.append(button('Discard draft',()=>mutate(()=>changeActionStatus(action,'cancelled'),'Draft discarded; no provider action cancelled'),'button text small'));
-      card.append(actions);target.append(card);
-    }
+      card.append(actions);return card;
+  }
+  function renderActions(){
+    const target=$('action-list');target.replaceChildren();
+    for(const action of state.actions.slice().reverse())target.append(actionCard(action));
     if(!state.actions.length)empty(target,'No prepared requests yet. Ask Tidy to prepare a purchase, booking or message.');
+  }
+  function renderReminders(){
+    taskList('reminder-tasks',state.tasks.filter(task=>task.remindAt!==null),'No reminders yet. Tell Ask Tidy what to remember and when.');
+    $('reminders-delivery-status').textContent=state.settings.remindersPaused?'Alerts are paused. Open reminder settings to resume them.':'Reminders are active while Tidy is open. Browser notifications also depend on your permission.';
+  }
+  function renderAppointments(){
+    taskList('appointment-tasks',state.tasks.filter(task=>task.type==='appointment'),'No appointments entered yet. Add an appointment with its date and time.');
+    const target=$('appointment-requests');target.replaceChildren();
+    for(const action of state.actions.slice().reverse().filter(action=>action.kind==='booking'))target.append(actionCard(action));
+    if(!target.children.length)empty(target,'No appointment requests awaiting preparation. Tidy has not contacted a provider.');
   }
   function changeActionStatus(shown,status){const latest=state.actions.find(action=>action.id===shown.id);if(!latest||!same(shown,latest))throw Error('This request changed in another tab. Review the current draft before changing its approval.');latest.status=status;}
   function readMealGroceries(message){
@@ -207,35 +220,102 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();
   }
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
-  function capture(text){
-    if(refreshSavedData())renderAll();
-    const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks});response(result.message);
-    if(result.kind==='answer')return;
-    if(result.kind==='action'){
-      const action={id:id('request'),kind:result.action.kind,title:result.action.title,details:result.action.details||'',provider:'',link:'',status:'needs_review',createdAt:Date.now()};
-      if(mutate(()=>{state.actions.push(action);},'Request saved for review')){response('Prepared a local draft: '+action.title+'. '+(ui.saveFailed||ui.storageLocked?'Kept in this tab; download a backup before closing. ':'Saved on this browser. ')+'It needs review. No order, message or booking has been made.');$('assistant-followup').append(button('Review draft',()=>openAction(action,action.id)));}return;
-    }
-    if(result.kind==='clarify'){
-      ui.lastDraft=result.draft||{title:text,category:'Home'};const controls=el('div',undefined,'followup-actions');controls.append(button('Fill in the missing details',()=>openTask(ui.lastDraft,null,result.message,result.reminderRequested===true),'button'));$('assistant-followup').append(controls);return;
-    }
-    const draft=result.draft;
-    if(result.kind==='grocery'){
-      const existing=state.tasks.find(task=>task.status==='open'&&task.type==='grocery'&&task.title.toLocaleLowerCase()===draft.title.toLocaleLowerCase());
-      if(existing){response(existing.quantity&&draft.quantity&&existing.quantity!==draft.quantity?'This item is already on the list with a different quantity. Review it before changing the amount.':'This item is already on your grocery list.');$('assistant-followup').append(button('Review item',()=>openTask({...existing,quantity:draft.quantity||existing.quantity},existing.id)));return;}
-    }
-    let created;
-    if(mutate(()=>{created=C.createTask(state,draft);},'Saved to Tidy')){response(`${ui.saveFailed||ui.storageLocked?'Kept in this tab; download a backup before closing.':'Saved on this browser.'} ${created.type==='grocery'?'Grocery item':created.type==='appointment'?'Appointment you entered':'Task'}: ${created.title}. ${result.message}${created.remindAt!==null?' The demo must remain open to show this alert.':''}`);$('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));if(created.type==='grocery')$('assistant-followup').append(button('View shopping',()=>{showView('tools');$('shopping-card').scrollIntoView({block:'start'});}));}
+  function renderActivity(){
+    const activity=ui.activity;$('assistant-activity').hidden=!activity||activity.dismissed;if(!activity)return;
+    $('assistant-activity').dataset.status=activity.status;$('assistant-activity-title').textContent=activity.title;$('assistant-activity-message').textContent=activity.message;
+    const steps=$('assistant-activity-steps');steps.replaceChildren();
+    for(const step of activity.steps){const item=el('li',(step.status==='done'?'✓ ':step.status==='error'?'! ':'')+step.label,'activity-step');item.dataset.status=step.status;steps.append(item);}
+    $('assistant-activity-open').hidden=!activity.target&&!activity.resume;$('assistant-activity-open').textContent=activity.resume?'Continue with the details':'Show me the result';$('assistant-activity-open').disabled=ui.captureBusy;
+    $('assistant-activity-dismiss').disabled=ui.captureBusy;
   }
-  function openTask(draft={},editingId=null,message='',requestReminder=false){
+  function startActivity(){ui.activity={status:'working',title:'Understanding your request',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();}
+  function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
+  function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
+  function destination(task){return task.type==='appointment'?'appointments':task.remindAt!==null?'reminders':task.type==='grocery'?'tools':'family';}
+  function readableTime(epoch){return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(epoch))+' Dubai time';}
+  function revealActivityTarget(focusCard=false){
+    const target=ui.activity?.target;if(!target)return;
+    const item=state[target.kind==='action'?'actions':'tasks'].find(item=>item.id===target.id);
+    if(!item){toast('This item is no longer in Tidy.');return;}
+    ui.highlightTaskId=target.kind==='task'?item.id:null;ui.highlightActionId=target.kind==='action'?item.id:null;
+    const view=target.kind==='action'?(item.kind==='booking'?'appointments':'tools'):destination(item);
+    if(view==='family'){$('task-search').value='';$('category-filter').value='all';$('person-filter').value='all';$('status-filter').value='all';}
+    showView(view);
+    if(focusCard){const card=[...$('view-'+view).querySelectorAll(target.kind==='action'?'[data-action-id]':'[data-task-id]')].find(card=>(target.kind==='action'?card.dataset.actionId:card.dataset.taskId)===item.id);if(card){card.focus({preventScroll:true});card.scrollIntoView({block:'center',behavior:'instant'});}}
+  }
+  function finishTaskActivity(task,saved,existing=false){
+    const reminder=task.remindAt!==null,appointment=task.type==='appointment';
+    ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;
+    ui.activity.status=saved?'done':'error';
+    ui.activity.title=!saved?'Not saved on this browser':existing?'Already on your shopping list':appointment?'Appointment added to your plan':reminder?'Reminder set':task.type==='grocery'?'Added to your shopping list':'Task added';
+    let message=task.title+'. ';
+    if(reminder)message+='Reminder: '+readableTime(task.remindAt)+'. '+(state.settings.remindersPaused?'Alerts are paused; open reminder settings to resume them.':'Keep Tidy open for this alert.');
+    else if(appointment)message+=prettyDate(task.dueDate)+' at '+task.dueTime+' Dubai time. This is your local record; Tidy has not booked or confirmed it with a provider.';
+    else if(task.type==='grocery')message+='Your list is ready to review. No order has been placed.';
+    else message+='Saved in your responsibilities.';
+    if(!saved)message+=' This change is kept in this tab only. Download a backup before closing.';
+    ui.activity.message=message;activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+(appointment?'appointments':reminder?'reminders':task.type==='grocery'?'shopping list':'responsibilities'));
+    response(message);revealActivityTarget();renderActivity();
+  }
+  function waitForTaskDetails(text,result){
+    const draft=result.draft||{title:text,category:'Home'},flow={text,result};ui.lastDraft=draft;
+    ui.activity.status='waiting';ui.activity.title='A little more information';ui.activity.message=result.message;activityStep(0,'done');activityStep(1,'working','Waiting for your details');
+    const resume=()=>openTask(draft,null,result.message,result.reminderRequested===true,flow);ui.activity.resume=resume;
+    $('assistant-followup').append(button('Fill in the missing details',resume,'button'));
+    if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){showView(draft.type==='appointment'?'appointments':'reminders');resume();}
+    renderActivity();
+  }
+  async function capture(text){
+    if(ui.captureBusy)return;ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
+    try{
+      await paintActivity();if(refreshSavedData())renderAll();
+      const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks});response(result.message);activityStep(0,'done');
+      if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
+      if(result.kind==='clarify'){waitForTaskDetails(text,result);return;}
+      activityStep(1,'working',result.kind==='action'?'Preparing your draft':'Saving your item');await paintActivity();
+      if(refreshSavedData())renderAll();
+      if(result.kind==='action'){
+        const action={id:id('request'),kind:result.action.kind,title:result.action.title,details:result.action.details||'',provider:'',link:'',status:'needs_review',createdAt:Date.now()};
+        state=C.validateSnapshot({...state,actions:[...state.actions,action]});const saved=save();renderAll();
+        ui.activity.target={kind:'action',id:action.id};ui.activity.status=saved?'done':'error';ui.activity.title=saved?(action.kind==='booking'?'Appointment request ready for review':'Draft ready for review'):'Draft kept in this tab only';
+        ui.activity.message='Prepared: '+action.title+'. '+(saved?'Saved on this browser.':'Not saved locally; download a backup before closing.')+' Your approval is needed. Nothing has been booked, purchased or sent.';
+        activityStep(1,saved?'done':'error',saved?'Saved a draft for review':'Local saving failed');revealActivityTarget();activityStep(2,'done',action.kind==='booking'?'Opened appointment requests':'Opened your requests');response(ui.activity.message);$('assistant-followup').append(button('Review draft',()=>openAction(action,action.id)));return;
+      }
+      const draft=result.draft;
+      if(result.kind==='grocery'){
+        const existing=state.tasks.find(task=>task.status==='open'&&task.type==='grocery'&&task.title.toLocaleLowerCase()===draft.title.toLocaleLowerCase());
+        if(existing){
+          finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);
+          if(existing.quantity&&draft.quantity&&existing.quantity!==draft.quantity){ui.activity.status='waiting';ui.activity.message='This item already has a different quantity. Review it before changing the amount.';ui.activity.resume=()=>openTask({...existing,quantity:draft.quantity},existing.id,ui.activity.message,false,{text,result});response(ui.activity.message);$('assistant-followup').append(button('Review item',ui.activity.resume));renderActivity();}
+          return;
+        }
+      }
+      const created=C.createTask(state,draft);const saved=save();renderAll();finishTaskActivity(created,saved);$('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));
+    }catch(problem){ui.activity.status='error';ui.activity.title='This request could not be completed';ui.activity.message=problem.message+' Check the details and try again.';const step=ui.activity.steps.find(step=>step.status==='working');if(step)step.status='error';response(ui.activity.message);renderActivity();}
+    finally{ui.captureBusy=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;$('capture-form').removeAttribute('aria-busy');renderActivity();}
+  }
+  function quickTaskChoices(flow){
+    const target=$('task-assistant-choices');target.replaceChildren();target.hidden=!flow;if(!flow)return;
+    target.append(el('p','Choose any missing date and time. All times are Dubai time.','helper'));
+    const sync=()=>{if($('task-reminder').checked&&$('task-date').value&&$('task-time').value)$('task-reminder-at').value=$('task-date').value+'T'+$('task-time').value;};
+    if(!$('task-date').value)for(const [label,offset] of [['Today',0],['Tomorrow',1]])target.append(button(label,()=>{$('task-date').value=C.addDays(C.today(),offset);sync();}));
+    const clock=flow.text.match(/\bat\s+(\d{1,2})(?:\s*o['’]?clock)?(?=\s|[.,!?]|$)/i),hour=Number(clock?.[1]);
+    if(!$('task-time').value&&hour>=1&&hour<=12)for(const [label,clockHour] of [[hour+' am',hour%12],[hour+' pm',hour%12+12]])target.append(button(label,()=>{$('task-time').value=String(clockHour).padStart(2,'0')+':00';sync();}));
+  }
+  function cancelTaskCapture(){if(!ui.taskCapture)return;ui.taskCapture=null;ui.activity.status='waiting';ui.activity.title='Details have not been saved';ui.activity.message='Nothing new has been saved. Continue with the details when you are ready.';renderActivity();}
+  function openTask(draft={},editingId=null,message='',requestReminder=false,flow=null){
+    ui.taskCapture=flow;
     ui.editingTask=editingId;ui.taskBaseline=editingId?copy(state.tasks.find(task=>task.id===editingId)||null):null;error('task-error','');$('task-dialog-title').textContent=editingId?'Edit task':'Add a task';$('task-draft-message').textContent=message;
     populatePeople($('task-person'),'Unassigned','');
     $('task-title').value=draft.title||'';$('task-type').value=draft.type||'task';$('task-category').value=draft.category||'Home';$('task-person').value=draft.assigneeId||'';$('task-priority').value=draft.priority||'normal';$('task-date').value=draft.dueDate||'';$('task-time').value=draft.dueTime||'';$('task-repeat').value=draft.repeat||'none';$('task-quantity').value=draft.quantity||'';$('task-notes').value=draft.notes||'';$('task-link').value=draft.link||'';
     $('task-reminder').checked=draft.remindAt!==null&&draft.remindAt!==undefined||requestReminder;
     $('task-reminder-at').value=draft.remindAt!==null&&draft.remindAt!==undefined?clockValue(draft.remindAt):draft.dueDate&&draft.dueTime&&requestReminder?draft.dueDate+'T'+draft.dueTime:'';
-    syncTaskControls();$('task-dialog').showModal();$('task-title').focus();
+    if(flow){$('task-dialog-title').textContent=draft.type==='appointment'?'Finish your appointment':requestReminder?'Set your reminder':'Finish the details';}
+    $('save-task').textContent=flow?(draft.type==='appointment'?'Save appointment':requestReminder?'Set reminder':'Save task'):'Save task';
+    quickTaskChoices(flow);syncTaskControls();$('task-dialog').showModal();$('task-title').focus();
   }
   function syncTaskControls(){
     $('quantity-label').hidden=$('task-type').value!=='grocery';$('reminder-at-label').hidden=!$('task-reminder').checked;
@@ -248,10 +328,11 @@
       let remindAt=null;
       if($('task-reminder').checked){const parts=$('task-reminder-at').value.split('T');if(parts.length!==2)throw Error('Choose a reminder date and time.');remindAt=C.dueEpoch(parts[0],parts[1]);}
       let patch={title:$('task-title').value,category:$('task-category').value,assigneeId:$('task-person').value||null,type:$('task-type').value,priority:$('task-priority').value,dueDate:$('task-date').value,dueTime:$('task-time').value,repeat:$('task-repeat').value,quantity:$('task-quantity').value,notes:$('task-notes').value,link:$('task-link').value,remindAt};
+      if(ui.taskCapture&&remindAt!==null&&!patch.dueDate){const when=clockValue(remindAt).split('T');patch.dueDate=when[0];patch.dueTime=when[1];}
       const old=state.tasks.find(task=>task.id===ui.editingTask);
       if(ui.editingTask)patch=mergeFields(ui.taskBaseline,old,patch,Object.keys(patch));
       if(patch.remindAt!==null&&patch.remindAt<=Date.now()&&patch.remindAt!==old?.remindAt)throw Error('Choose a reminder time in the future.');
-      const task=ui.editingTask?C.updateTask(state,ui.editingTask,patch):C.createTask(state,patch);const saved=save();$('task-dialog').close();renderAll();toast('Saved '+task.title+(saved?'':' · in this tab only'));checkReminders();
+      const task=ui.editingTask?C.updateTask(state,ui.editingTask,patch):C.createTask(state,patch);const saved=save(),flow=ui.taskCapture;ui.taskCapture=null;$('task-dialog').close();renderAll();toast('Saved '+task.title+(saved?'':' · in this tab only'));if(flow||ui.activity?.target?.kind==='task'&&ui.activity.target.id===task.id)finishTaskActivity(task,saved);checkReminders();
     }catch(problem){error('task-error',problem.message);}
   }
   function openAction(action={},editingId=null){ui.editingAction=editingId;ui.actionBaseline=editingId?copy(state.actions.find(item=>item.id===editingId)||null):null;error('action-error','');$('action-title').value=action.title||'';$('action-kind').value=action.kind||'purchase';$('action-provider').value=action.provider||'';$('action-link').value=action.link||'';$('action-details').value=action.details||'';$('action-dialog').showModal();}
@@ -403,9 +484,17 @@
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
-  $('capture-form').addEventListener('submit',event=>{event.preventDefault();try{capture($('capture-text').value);}catch(problem){response(problem.message);}});
+  $('capture-form').addEventListener('submit',event=>{event.preventDefault();void capture($('capture-text').value);});
+  $('assistant-activity-open').addEventListener('click',()=>{if(ui.activity?.resume)ui.activity.resume();else revealActivityTarget(true);});
+  $('assistant-activity-dismiss').addEventListener('click',()=>{if(ui.activity){ui.activity.dismissed=true;renderActivity();}});
+  for(const name of ['today-reminders','routines-reminders'])$(name).addEventListener('click',()=>showView('reminders'));
+  for(const name of ['today-appointments','family-appointments'])$(name).addEventListener('click',()=>showView('appointments'));
+  $('reminders-settings').addEventListener('click',showSettings);
+  $('reminders-add').addEventListener('click',()=>{startActivity();waitForTaskDetails('',{kind:'clarify',reminderRequested:true,draft:{title:'Reminder'},message:'Choose the date and time for your reminder. Keep Tidy open for the alert.'});});
+  $('appointments-add').addEventListener('click',()=>{startActivity();waitForTaskDetails('',{kind:'clarify',appointmentRequested:true,draft:{type:'appointment',category:'Health'},message:'What is the appointment for, and when is it? This saves a local record; it does not book with a provider.'});});
+  $('task-dialog').addEventListener('cancel',cancelTaskCapture);
   for(const example of document.querySelectorAll('[data-example]'))example.addEventListener('click',()=>{$('capture-text').value=example.dataset.example;$('capture-text').focus();});
-  for(const close of document.querySelectorAll('[data-close]'))close.addEventListener('click',()=>$(close.dataset.close).close());
+  for(const close of document.querySelectorAll('[data-close]'))close.addEventListener('click',()=>{if(close.dataset.close==='task-dialog')cancelTaskCapture();$(close.dataset.close).close();});
   $('website-dialog').addEventListener('close',()=>{ui.websiteUrl=null;$('website-frame').src='about:blank';$('website-frame').hidden=true;$('website-open-direct').removeAttribute('href');$('website-recovery').hidden=true;$('website-choice').hidden=true;});
   $('website-try-inside').addEventListener('click',()=>{loadWebsiteView();$('website-report-problem').focus();});
   $('website-report-problem').addEventListener('click',stopWebsiteView);

@@ -261,3 +261,108 @@ test('duplicate member names ask which person instead of choosing the first', ()
   assert.equal(parse('Add task: pick up kids tomorrow assigned to Dad Junior', { members }).draft.assigneeId, 'dad-junior');
   assert.equal(parse('Dad Junior: pick up kids tomorrow', { members }).draft.assigneeId, 'dad-junior');
 });
+
+test('notification and alarm requests retain reminder intent and exact Dubai times', () => {
+  for (const text of [
+    'Put me a notification tomorrow at 6 pm',
+    'Notify me tomorrow at 6 pm',
+    'Do me a notification tomorrow at 6 o’clock pm',
+    'Set an alarm tomorrow at 6 o\'clock pm',
+    'Create an alarm tomorrow at 6 pm',
+    'Add a notification for me tomorrow at 6 pm',
+    'Please make me a reminder tomorrow at 6 pm',
+    'Could you put a notification tomorrow at 6 pm',
+    'Do me a notification, put me a notification tomorrow at 6 o’clock pm'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.equal(result.draft.title, 'Reminder', text);
+    assert.equal(result.draft.dueDate, '2026-10-13', text);
+    assert.equal(result.draft.dueTime, '18:00', text);
+    assert.equal(result.draft.remindAt, Date.parse('2026-10-13T18:00:00+04:00'), text);
+    assert.equal(result.action, undefined, text);
+  }
+  const purpose = parse('Put me a notification to pick up the children tomorrow at 6 o’clock am');
+  assert.equal(purpose.draft.title, 'pick up the children');
+  assert.equal(purpose.draft.dueTime, '06:00');
+  const notify = parse('Notify me to call the clinic tomorrow at 6 pm');
+  assert.equal(notify.kind, 'task');
+  assert.equal(notify.draft.title, 'call the clinic');
+  assert.equal(notify.reminderRequested, true);
+});
+
+test('bare o’clock requests ask for date and AM or PM without preparing an alert', () => {
+  for (const text of [
+    'Put me a notification at 6 o’clock',
+    'Notify me at 6 o’clock',
+    'Do me a notification, put me a notification at 6 o’clock',
+    'Set an alarm at 6 o\'clock',
+    'Add a reminder at 6'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.equal(result.draft.title, 'Reminder', text);
+    assert.equal(result.draft.dueDate, '', text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.ok(result.missing.includes('dueDate'), text);
+    assert.ok(result.missing.includes('dueTime'), text);
+    assert.match(result.message, /am|pm/i, text);
+  }
+  const missingTime = parse('Put me a notification tomorrow');
+  assert.deepEqual(missingTime.missing, ['dueTime']);
+  assert.equal(missingTime.reminderRequested, true);
+  const foreign = parse('Set an alarm tomorrow at 6 o’clock pm London time');
+  assert.equal(foreign.kind, 'clarify');
+  assert.equal(foreign.reminderRequested, true);
+  assert.equal(foreign.draft.dueTime, '');
+  assert.equal(foreign.draft.remindAt, null);
+});
+
+test('natural appointment entry is a local record with required details', () => {
+  for (const text of [
+    'Add an appointment: dentist tomorrow at 6 pm',
+    'Create an appointment with the dentist tomorrow at 6 pm',
+    'Make me an appointment for dentist tomorrow at 6 pm',
+    'Do an appointment dentist tomorrow at 6 o’clock pm',
+    'Please do me an appointment with the dentist tomorrow at 6 pm'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.appointmentRequested, true, text);
+    assert.equal(result.draft.type, 'appointment', text);
+    assert.equal(result.draft.category, 'Health', text);
+    assert.equal(result.draft.dueDate, '2026-10-13', text);
+    assert.equal(result.draft.dueTime, '18:00', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.action, undefined, text);
+    assert.match(result.message, /has not contacted|not.*confirm/i, text);
+  }
+  const incomplete = parse('Do an appointment at 6 o’clock');
+  assert.equal(incomplete.kind, 'clarify');
+  assert.equal(incomplete.appointmentRequested, true);
+  assert.equal(incomplete.draft.type, 'appointment');
+  assert.equal(incomplete.draft.title, '');
+  assert.deepEqual(incomplete.missing, ['dateOrTime', 'title', 'dueDate', 'dueTime']);
+  assert.equal(incomplete.draft.remindAt, null);
+  assert.match(incomplete.message, /am|pm/i);
+});
+
+test('scheduling and booking appointment requests remain review drafts, never local confirmations', () => {
+  for (const text of [
+    'Book an appointment with the dentist tomorrow at 6 pm',
+    'Reserve an appointment with the dentist tomorrow at 6 pm',
+    'Schedule an appointment with the dentist tomorrow at 6 pm'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'action', text);
+    assert.equal(result.action.kind, 'booking', text);
+    assert.equal(result.action.status, 'needs_review', text);
+    assert.equal(result.draft, undefined, text);
+    assert.match(result.message, /nothing has been sent, purchased, or booked/i, text);
+  }
+  assert.equal(parse('Set an alarm to book the dentist tomorrow at 6 pm').kind, 'task');
+  assert.equal(parse('Set an alarm to book the dentist tomorrow at 6 pm').action, undefined);
+});

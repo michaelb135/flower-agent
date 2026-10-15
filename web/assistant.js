@@ -95,8 +95,9 @@
     if (/\b\d{1,4}[/.]\d{1,2}(?:[/.]\d{1,4})?\b/.test(text)) {
       problems.push('Please enter the date as YYYY-MM-DD so the day and month are clear.');
     }
-    const timeRE = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b|\b(noon|midnight)\b/gi;
+    const timeRE = /\b(\d{1,2})(?::(\d{2}))?(?:\s+o['’]?clock)?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b|\b(noon|midnight)\b/gi;
     const timeSpans = [];
+    let unresolvedClock = false;
     for (const match of text.matchAll(timeRE)) {
       let hours;
       let minutes;
@@ -115,14 +116,27 @@
         valid = hours < 24 && minutes < 60;
       }
       if (valid) times.push(`${pad(hours)}:${pad(minutes)}`);
-      else problems.push('That time is not valid. Use a time such as 3 pm or 15:30.');
+      else {
+        unresolvedClock = true;
+        problems.push('That time is not valid. Use a time such as 3 pm or 15:30.');
+      }
+      remove(match);
+      timeSpans.push([match.index, match.index + match[0].length]);
+    }
+    for (const match of text.matchAll(/\b(\d{1,2})\s+o['’]?clock\b/gi)) {
+      if (timeSpans.some(([start, end]) => match.index >= start && match.index < end)) continue;
+      unresolvedClock = true;
+      problems.push(`Do you mean ${match[1]} am or ${match[1]} pm? Please choose an exact Dubai time.`);
       remove(match);
       timeSpans.push([match.index, match.index + match[0].length]);
     }
     for (const match of text.matchAll(/\bat\s+(\d{1,2})(?:[:.]\d{1,2})?/gi)) {
       const numberIndex = match.index + match[0].indexOf(match[1]);
       if (!timeSpans.some(([start, end]) => numberIndex >= start && numberIndex < end)) {
+        unresolvedClock = true;
         problems.push('Please specify an unambiguous time, such as 3 pm or 15:00.');
+        remove(match);
+        timeSpans.push([match.index, match.index + match[0].length]);
       }
     }
     // A foreign clock label is a request to convert time, which this local
@@ -156,7 +170,7 @@
       .replace(/\s+/g, ' ').replace(/^[\s,:;.]+|[\s,:;.!?]+$/g, '').trim();
     return {
       dueDate: new Set(dates).size === 1 ? dates[0] : '',
-      dueTime: !foreignZone && !unsupportedClock && new Set(times).size === 1 ? times[0] : '',
+      dueTime: !unresolvedClock && !foreignZone && !unsupportedClock && new Set(times).size === 1 ? times[0] : '',
       repeat: new Set(repeats).size === 1 ? repeats[0] : 'none', title,
       problems: Array.from(new Set(problems))
     };
@@ -199,7 +213,7 @@
       memberGroups.get(name).push(member);
     }
     const prefix = text.match(/^([^:]{1,60}):\s*(.+)$/);
-    if (prefix && !/^(?:(?:add|create)\s+(?:a\s+)?)?(?:task|(?:work|home|school|shopping|health)(?:\s+task)?|grocer(?:y|ies)|shopping list|appointment|reminder)$/i.test(prefix[1].trim())) {
+    if (prefix && !/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:add|create|make|do|put|set|schedule)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?)?(?:task|(?:work|home|school|shopping|health)(?:\s+task)?|grocer(?:y|ies)|shopping list|appointment|reminder|notification|alarm)$/i.test(prefix[1].trim())) {
       const people = memberGroups.get(prefix[1].trim().toLowerCase()) || [];
       if (people.length) {
         if (people.length === 1) draft.assigneeId = people[0].id;
@@ -228,21 +242,29 @@
     if (/\bassign(?:ed)? to\b/i.test(text)) assignmentProblem = 'Choose a known family member for the assignment.';
     if (assignmentProblem) draft.assigneeId = null;
 
-    const reminderRE = /^(?:please\s+)?(?:remind\s+(?:me|us)|(?:set|create|add|schedule)\s+(?:a\s+)?reminder(?:\s+for\s+(?:me|us))?)(?:\s+(?:to|about))?\s*:?\s*/i;
+    const reminderRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:remind|notify)\s+(?:me|us)|(?:set|create|add|schedule|put|make|do)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?(?:reminder|notification|alarm)\b(?:\s+for\s+(?:me|us))?|(?:reminder|notification|alarm)\s*:)(?:\s+(?:to|about)\b)?\s*:?\s*/i;
     const isReminder = reminderRE.test(text);
-    if (isReminder) text = text.replace(reminderRE, '');
+    if (isReminder) {
+      text = text.replace(reminderRE, '');
+      // Spoken requests sometimes repeat the command after a pause. Remove a
+      // second command only after punctuation, preserving ordinary task text.
+      const restated = text.match(/^[,;.]\s*(.+)$/);
+      if (restated && reminderRE.test(restated[1])) text = restated[1].replace(reminderRE, '');
+    }
+    let appointmentRequested = false;
     const needDetails = (message, draft, missing) => {
       const result = clarify(message, draft, missing);
       if (isReminder) result.reminderRequested = true;
+      if (appointmentRequested) result.appointmentRequested = true;
       return result;
     };
 
     // Requests to spend money, contact someone or arrange bookings are drafts only.
-    const actionMatch = !isReminder && text.match(/^(?:please\s+)?(?:can you\s+)?(book|reserve|buy|purchase|order|send(?:\s+(?:a|the))?\s+message|message|email|contact)\b\s*(.*)/i);
+    const actionMatch = !isReminder && text.match(/^(?:please\s+)?(?:(?:can|could) you\s+)?(book|reserve|schedule(?=\s+(?:(?:an?|the)\s+)?appointment\b)|buy|purchase|order|send(?:\s+(?:a|the))?\s+message|message|email|contact)\b\s*(.*)/i);
     if (actionMatch) {
       if (text.length > 300) return clarify('Please shorten the action request to 300 characters or fewer. Nothing has been sent, purchased, or booked.');
       const verb = actionMatch[1].toLowerCase();
-      const kind = /book|reserve/.test(verb) ? 'booking' : /buy|purchase|order/.test(verb) ? 'purchase' : 'message';
+      const kind = /book|reserve|schedule/.test(verb) ? 'booking' : /buy|purchase|order/.test(verb) ? 'purchase' : 'message';
       const action = { kind, status: 'needs_review', title: text, details: text, createdFrom: 'local-capture' };
       const noun = kind === 'booking' ? 'booking request' : kind === 'purchase' ? 'purchase request' : 'message request';
       return {
@@ -264,11 +286,13 @@
       recognised = true;
       text = text.replace(/^(?:please\s+)?(?:add|create)\s+(?:a\s+)?task\s*:?\s*/i, '');
     }
-    if (/^(?:add\s+(?:an?\s+)?)?appointment\s*:\s*/i.test(text)) {
+    const appointmentRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:add|create|make|do|put)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?)?appointment(?:\s*:\s*|\s+|$)/i;
+    if (appointmentRE.test(text)) {
       recognised = true;
+      appointmentRequested = true;
       draft.type = 'appointment';
       draft.category = categoryExplicit ? draft.category : 'Health';
-      text = text.replace(/^(?:add\s+(?:an?\s+)?)?appointment\s*:\s*/i, '');
+      text = text.replace(appointmentRE, '').replace(/^(?:with|for)\s+(?:the\s+)?/i, '');
     }
 
     const groceryPrefix = text.match(/^(?:groceries|grocery|shopping list)\s*:\s*(.+)$/i);
@@ -290,6 +314,7 @@
     Object.assign(draft, {
       title: when.title, dueDate: when.dueDate, dueTime: when.dueTime, repeat: when.repeat
     });
+    if (isReminder && !draft.title) draft.title = 'Reminder';
     const quantity = draft.type === 'grocery' && draft.title.match(/^(\d+(?:\.\d+)?\s*(?:kg|g|l|ml|packs?|bottles?|boxes?)?)\s+(?:of\s+)?(.+)$/i);
     if (quantity) {
       draft.quantity = quantity[1];
@@ -325,6 +350,8 @@
     }
     return {
       kind: 'task', draft,
+      ...(isReminder ? { reminderRequested: true } : {}),
+      ...(appointmentRequested ? { appointmentRequested: true } : {}),
       message: draft.type === 'appointment'
         ? 'Review and save this appointment you entered locally. Tidy has not contacted the provider or confirmed a booking.'
         : isReminder
