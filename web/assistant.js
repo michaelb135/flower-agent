@@ -172,6 +172,7 @@
       dueDate: new Set(dates).size === 1 ? dates[0] : '',
       dueTime: !unresolvedClock && !foreignZone && !unsupportedClock && new Set(times).size === 1 ? times[0] : '',
       repeat: new Set(repeats).size === 1 ? repeats[0] : 'none', title,
+      clockRequested: timeSpans.length > 0,
       problems: Array.from(new Set(problems))
     };
   }
@@ -243,7 +244,7 @@
     if (assignmentProblem) draft.assigneeId = null;
 
     const reminderRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:remind|notify)\s+(?:me|us)|(?:set|create|add|schedule|put|make|do)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?(?:reminder|notification|alarm)\b(?:\s+for\s+(?:me|us))?|(?:reminder|notification|alarm)\s*:)(?:\s+(?:to|about)\b)?\s*:?\s*/i;
-    const isReminder = reminderRE.test(text);
+    let isReminder = reminderRE.test(text);
     if (isReminder) {
       text = text.replace(reminderRE, '');
       // Spoken requests sometimes repeat the command after a pause. Remove a
@@ -299,11 +300,21 @@
     const groceryAdd = text.match(/^(?:please\s+)?add\s+(.+?)\s+to\s+(?:the\s+)?(?:grocery|shopping)\s+list[.!]?$/i);
     const outOf = text.match(/^(?:we(?:'re| are)|i(?:'m| am))\s+out of\s+(.+)|^(?:we|i)\s+(?:have\s+)?run out of\s+(.+)/i);
     const need = text.match(/^(?:we|i)\s+need\s+(?!to\b)(.+)/i);
-    if (!isReminder && draft.type !== 'appointment' && (groceryPrefix || groceryAdd || outOf || (need && GROCERY_WORDS.test(need[1])))) {
+    const groceryTrip = text.match(/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:get|do)\s+(?:(?:me|us)\s+)?(?:(?:a|the|some|my|our)\s+)?(?:grocery(?:\s+shopping)?|groceries)(?=$|[\s,.!?])\s*(.*)$/i);
+    const getGrocery = text.match(/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?get\s+(?:(?:me|us)\s+)?(?:some\s+)?(.+)$/i);
+    let groceryCapture = false;
+    if (!isReminder && draft.type !== 'appointment' && groceryTrip && !temporal(groceryTrip[1], dateToday).title) {
+      // A grocery trip is a responsibility, not an item to purchase. Keep the
+      // trailing schedule so a requested clock time can become a real reminder.
+      recognised = groceryCapture = true;
+      draft.category = 'Shopping';
+      text = 'Grocery shopping ' + groceryTrip[1];
+    } else if (!isReminder && draft.type !== 'appointment' && (groceryPrefix || groceryAdd || outOf || (need && GROCERY_WORDS.test(need[1])) || (getGrocery && GROCERY_WORDS.test(getGrocery[1])))) {
       recognised = true;
+      groceryCapture = true;
       draft.type = 'grocery';
       draft.category = 'Shopping';
-      text = groceryPrefix ? groceryPrefix[1] : groceryAdd ? groceryAdd[1] : outOf ? (outOf[1] || outOf[2]) : need[1];
+      text = groceryPrefix ? groceryPrefix[1] : groceryAdd ? groceryAdd[1] : outOf ? (outOf[1] || outOf[2]) : need && GROCERY_WORDS.test(need[1]) ? need[1] : getGrocery[1];
     }
     if (!categoryExplicit && draft.type === 'task') {
       if (/\b(?:school|homework|PE kit)\b/i.test(text)) draft.category = 'School';
@@ -311,6 +322,7 @@
     }
 
     const when = temporal(text, dateToday);
+    if (groceryCapture && when.clockRequested) isReminder = true;
     Object.assign(draft, {
       title: when.title, dueDate: when.dueDate, dueTime: when.dueTime, repeat: when.repeat
     });
@@ -346,7 +358,7 @@
     }
     const categoryNote = draft.category === 'Home' && !categoryExplicit ? ' The category defaults to Home and can be changed.' : '';
     if (draft.type === 'grocery') {
-      return { kind: 'grocery', draft, message: `Review this shared grocery-list item and save it locally. No order will be placed.${categoryNote}` };
+      return { kind: 'grocery', draft, ...(isReminder ? { reminderRequested: true } : {}), message: `Review this shared grocery-list item and save it locally. No order will be placed.${categoryNote}` };
     }
     return {
       kind: 'task', draft,

@@ -1,4 +1,4 @@
-"""Exercise Ask Tidy's visible progress and real local action results.
+"""Exercise Ask Tidy's conversational replies, progress and real local results.
 
 Serve web/ over HTTP and pass --url for that site or the published deployment.
 Each case uses a fresh browser context with synthetic data. Only the selected
@@ -44,12 +44,18 @@ BOUNDARY_FIXTURES = """
     const title = document.getElementById('assistant-activity-title')?.textContent || '';
     const steps = document.getElementById('assistant-activity-steps')?.textContent || '';
     const message = document.getElementById('assistant-activity-message')?.textContent || '';
-    const signature = JSON.stringify([status, title, steps, message]);
+    const replyNode = document.getElementById('assistant-activity-reply');
+    const reply = replyNode?.textContent || '';
+    const replyVisible = !!replyNode && !replyNode.hidden && replyNode.getClientRects().length > 0;
+    const replyBounds = replyNode?.getBoundingClientRect();
+    const replyInViewport = replyVisible && replyBounds.top >= 0 && replyBounds.bottom <= innerHeight &&
+      replyBounds.left >= 0 && replyBounds.right <= innerWidth;
+    const signature = JSON.stringify([status, title, steps, message, reply, replyVisible]);
     if (signature === previous) return;
     previous = signature;
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem('tidy.app.v1')); } catch (_) {}
-    window.__activityHistory.push({status, title, steps, message,
+    window.__activityHistory.push({status, title, steps, message, reply, replyVisible, replyInViewport,
       savedTasks: saved?.tasks?.length || 0, savedActions: saved?.actions?.length || 0});
   }).observe(document, {subtree:true, childList:true, characterData:true, attributes:true,
     attributeFilter:['data-status','hidden']});
@@ -90,14 +96,26 @@ def ask(page, text, status=None):
     wait_result(page, status)
 
 
-def assert_progress(page, terminal="done", before_tasks=0):
+def assert_progress(page, terminal="done", before_tasks=0, before_actions=0):
     history = page.evaluate("__activityHistory")
     assert any(item["status"] == "working" for item in history), history
     working = next(item for item in history if item["status"] == "working")
     assert working["savedTasks"] == before_tasks, history
+    assert working["savedActions"] == before_actions, history
+    assert working["replyVisible"] and working["reply"].strip(), history
+    assert working["replyInViewport"], working
+    assert re.search(r"\bI\b|\bme\b|\blet(?:'|’)s\b", working["reply"], re.I), working
     assert page.locator("#assistant-activity").get_attribute("data-status") == terminal
     assert page.locator("#assistant-activity-steps li").count() >= 2
-    return [{"status": item["status"], "title": item["title"]} for item in history]
+    return [{"status": item["status"], "title": item["title"], "reply": item["reply"]} for item in history]
+
+
+def conversational_reply(page):
+    reply = page.locator("#assistant-activity-reply")
+    assert reply.is_visible()
+    text = reply.inner_text().strip()
+    assert text and re.search(r"\bI\b|\bI(?:'|’)ve\b|\byou(?:r)?\b|\blet(?:'|’)s\b", text, re.I), text
+    return text
 
 
 def assert_destination(page, destination):
@@ -122,11 +140,13 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:9044/")
     parser.add_argument("--browser", default="/usr/bin/chromium")
     parser.add_argument("--case", action="append", default=[], help="Run only case names containing this text; repeat for more cases")
+    parser.add_argument("--output", type=Path, default=OUT, help="Directory for this run's report and failure screenshots")
     args = parser.parse_args()
     selected_origin = origin(args.url)
     if selected_origin[0] not in {"http", "https"} or not selected_origin[1]:
         parser.error("--url must identify an HTTP(S) deployment")
-    OUT.mkdir(parents=True, exist_ok=True)
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
     results, errors, blocked_requests = [], [], []
     hashes = {name: hashlib.sha256((ROOT / "web" / name).read_bytes()).hexdigest()
               for name in ["index.html", "styles.css", "app.js", "assistant.js", "core.js"]}
@@ -167,7 +187,7 @@ def main():
                 try:
                     result["activity"] = tab.locator("#assistant-activity").inner_text()
                     result["state"] = state(tab)
-                    tab.screenshot(path=str(OUT / ("failure-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") + ".png")), full_page=True)
+                    tab.screenshot(path=str(output / ("failure-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") + ".png")), full_page=True)
                 except Exception:
                     pass
             finally:
@@ -190,12 +210,15 @@ def main():
             assert row.is_visible() and "18:00" in row.inner_text() and "Alert set" in row.inner_text()
             assert "not iPhone Clock alarms" in tab.locator("#view-reminders").inner_text()
             assert not tab.locator("#alert-banner").is_visible()
+            reply = conversational_reply(tab)
+            assert "call Mum" in reply and re.search(r"remind|reminder", reply, re.I), reply
+            assert re.search(r"6:00|6\s*pm|18:00", reply, re.I), reply
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
             assert_destination(tab, "reminders")
             assert saved(tab)["tasks"] == [task]
             assert record(tab, task["id"], "reminder-tasks").is_visible()
-            return {"progress": history, "dueDate": task["dueDate"], "dueTime": task["dueTime"], "persistedAfterReload": True}
+            return {"progress": history, "replyOnDestination": reply, "dueDate": task["dueDate"], "dueTime": task["dueTime"], "persistedAfterReload": True}
 
         run("Complete notification request shows progress, saves correct Dubai reminder and opens its record", reminder)
 
@@ -207,6 +230,8 @@ def main():
             assert saved(tab) == before and not state(tab)["tasks"]
             assert tab.locator("#task-reminder").is_checked()
             assert tab.locator("#task-time").input_value() == ""
+            reply = conversational_reply(tab)
+            assert re.search(r"date|day|time|am|pm|detail", reply, re.I), reply
             choices = tab.locator("#task-assistant-choices")
             assert choices.is_visible()
             choices.get_by_role("button", name="Tomorrow", exact=True).click()
@@ -245,6 +270,7 @@ def main():
 
         def booking(tab):
             ask(tab, "Book an appointment with dentist tomorrow at 6 pm", "done")
+            assert_progress(tab)
             assert_destination(tab, "appointments")
             assert not saved(tab)["tasks"]
             action, = saved(tab)["actions"]
@@ -254,17 +280,23 @@ def main():
             assert re.search(r"review", receipt, re.I), receipt
             assert re.search(r"nothing(?: has been)? booked|not booked|no .*booking|no appointment.*confirmed", receipt, re.I), receipt
             assert "Needs your review" in tab.locator("#appointment-requests").inner_text()
-            return {"draftStatus": action["status"], "appointmentRecords": 0, "noExternalRequests": True}
+            reply = conversational_reply(tab)
+            assert re.search(r"draft|review", reply, re.I), reply
+            assert re.search(r"nothing.*booked|not.*booked|haven(?:'|’)t.*booked|no.*confirm", reply, re.I), reply
+            return {"draftStatus": action["status"], "appointmentRecords": 0, "reply": reply, "noExternalRequests": True}
 
         run("Booking request opens reviewable draft and explicitly leaves provider booking undone", booking)
 
         def groceries(tab):
             ask(tab, "We need milk", "done")
+            assert_progress(tab)
             assert_destination(tab, "shopping")
             task, = saved(tab)["tasks"]
             assert task["type"] == "grocery" and task["title"] == "milk"
             row = record(tab, task["id"], "shopping-tasks")
             assert row.is_visible()
+            reply = conversational_reply(tab)
+            assert "milk" in reply and re.search(r"list|shopping", reply, re.I), reply
             ask(tab, "We need milk")
             assert_destination(tab, "shopping")
             assert saved(tab)["tasks"] == [task]
@@ -273,6 +305,118 @@ def main():
             return {"firstSaved": True, "duplicateTasks": 0}
 
         run("Grocery request opens actual saved shopping item and repeated request does not duplicate it", groceries)
+
+        def timed_grocery_reply(tab):
+            ask(tab, "Get me milk tomorrow at 7 pm", "done")
+            history = assert_progress(tab)
+            assert_destination(tab, "shopping")
+            task, = saved(tab)["tasks"]
+            assert task["type"] == "grocery" and task["title"] == "milk", task
+            assert task["dueDate"] == TOMORROW and task["dueTime"] == "19:00", task
+            assert task["remindAt"] == int(datetime(2026, 10, 16, 15, tzinfo=timezone.utc).timestamp() * 1000), task
+            assert not saved(tab)["actions"]
+            assert record(tab, task["id"], "shopping-tasks").is_visible()
+            reply = conversational_reply(tab)
+            assert "milk" in reply and re.search(r"7:00|7\s*pm|19:00", reply, re.I), reply
+            assert re.search(r"list|shopping", reply, re.I), reply
+            assert not re.search(r"(?:I|we)(?:'ve| have| will)?\s+(?:ordered|bought|purchased|deliver(?:ed)?)\s+(?:you\s+)?milk", reply, re.I), reply
+            assert_no_overflow(tab, "#assistant-activity")
+            screenshot = output / "friendly-grocery-reply-390.png"
+            tab.screenshot(path=str(screenshot), full_page=True)
+            return {"progress": history, "replyOnShoppingPage": reply, "dueTime": task["dueTime"], "reminderSet": True,
+                    "orders": 0, "viewportWidth": 390, "screenshot": str(screenshot)}
+
+        run("Friendly grocery reply accompanies the real seven pm shopping reminder without claiming a purchase", timed_grocery_reply, width=390)
+
+        def existing_grocery_reminder(tab):
+            ask(tab, "We need milk", "done")
+            original, = saved(tab)["tasks"]
+            assert original["remindAt"] is None
+            ask(tab, "Get me milk tomorrow at 7 pm", "done")
+            assert_destination(tab, "shopping")
+            updated, = saved(tab)["tasks"]
+            assert updated["id"] == original["id"] and updated["title"] == "milk"
+            assert updated["dueDate"] == TOMORROW and updated["dueTime"] == "19:00", updated
+            assert updated["remindAt"] == int(datetime(2026, 10, 16, 15, tzinfo=timezone.utc).timestamp() * 1000), updated
+            assert record(tab, updated["id"], "shopping-tasks").is_visible()
+            reply = conversational_reply(tab)
+            assert "milk" in reply and re.search(r"7:00|7\s*pm|19:00", reply, re.I), reply
+            tab.reload()
+            tab.wait_for_function("!!window.TidyDemo")
+            assert saved(tab)["tasks"] == [updated]
+            return {"sameItemId": True, "reminderPersistedAfterReload": True, "duplicateItems": 0, "reply": reply}
+
+        run("Existing grocery gains the requested reminder on the same item instead of silently ignoring it", existing_grocery_reminder)
+
+        def quantity_review_preserves_reminder(tab):
+            ask(tab, "We need 1 bottle of milk", "done")
+            original, = saved(tab)["tasks"]
+            assert original["title"] == "milk" and original["quantity"] == "1 bottle", original
+            ask(tab, "Get me 2 bottles of milk tomorrow at 7 pm", "waiting")
+            assert_destination(tab, "shopping")
+            assert saved(tab)["tasks"] == [original]
+            reply = conversational_reply(tab)
+            assert re.search(r"review|quantity|amount", reply, re.I), reply
+            tab.locator("#assistant-activity-open").click()
+            assert tab.locator("#task-dialog").is_visible()
+            assert tab.locator("#task-quantity").input_value() == "2 bottles"
+            assert tab.locator("#task-date").input_value() == TOMORROW
+            assert tab.locator("#task-time").input_value() == "19:00"
+            assert tab.locator("#task-reminder").is_checked()
+            assert tab.locator("#task-reminder-at").input_value() == TOMORROW + "T19:00"
+            assert saved(tab)["tasks"] == [original]
+            tab.locator("#save-task").click()
+            wait_result(tab, "done")
+            updated, = saved(tab)["tasks"]
+            assert updated["id"] == original["id"] and updated["quantity"] == "2 bottles", updated
+            assert updated["dueTime"] == "19:00" and updated["remindAt"] is not None, updated
+            assert_destination(tab, "shopping")
+            return {"reviewBeforeQuantityOrTimeChanged": True, "requestedTimeRetained": True, "sameItemId": True, "duplicateItems": 0}
+
+        run("Different grocery quantity waits for review while retaining the requested reminder in its editor", quantity_review_preserves_reminder)
+
+        def ambiguous_grocery_reply(tab):
+            before = saved(tab)
+            ask(tab, "Get me a grocery at 7 o'clock", "waiting")
+            assert_progress(tab, "waiting")
+            assert_destination(tab, "reminders")
+            assert saved(tab) == before and not state(tab)["tasks"]
+            assert tab.locator("#task-dialog").is_visible()
+            assert tab.locator("#task-reminder").is_checked()
+            assert not tab.locator("#task-date").input_value() and not tab.locator("#task-time").input_value()
+            reply = conversational_reply(tab)
+            assert re.search(r"date|day|time|am|pm|detail", reply, re.I), reply
+            choices = tab.locator("#task-assistant-choices")
+            choices.get_by_role("button", name="Tomorrow", exact=True).click()
+            choices.get_by_role("button", name="7 pm", exact=True).click()
+            tab.locator("#save-task").click()
+            wait_result(tab, "done")
+            task, = saved(tab)["tasks"]
+            assert task["category"] == "Shopping" and task["type"] == "task", task
+            assert task["dueDate"] == TOMORROW and task["dueTime"] == "19:00", task
+            assert task["remindAt"] is not None and not saved(tab)["actions"]
+            assert record(tab, task["id"], "reminder-tasks").is_visible()
+            reply = conversational_reply(tab)
+            assert re.search(r"groc|shopping", reply, re.I), reply
+            assert re.search(r"7:00|7\s*pm|19:00", reply, re.I), reply
+            return {"clarifiedBeforeSaving": True, "replyOnReminderPage": reply, "chosenTime": task["dueTime"], "orders": 0}
+
+        run("Ambiguous get me a grocery at seven replies with a question and saves only the chosen date and time", ambiguous_grocery_reply)
+
+        def purchase_reply(tab):
+            ask(tab, "Order milk from Waitrose tomorrow at 7 pm", "done")
+            assert_progress(tab)
+            assert_destination(tab, "requests")
+            assert not saved(tab)["tasks"]
+            action, = saved(tab)["actions"]
+            assert action["kind"] == "purchase" and action["status"] == "needs_review"
+            assert tab.locator(f'#action-list [data-action-id="{action["id"]}"]').is_visible()
+            reply = conversational_reply(tab)
+            assert re.search(r"draft|review", reply, re.I), reply
+            assert re.search(r"nothing.*(?:purchased|ordered)|not.*(?:purchased|ordered)|haven(?:'|’)t.*(?:purchased|ordered)", reply, re.I), reply
+            return {"draftStatus": action["status"], "replyOnRequestsPage": reply, "externalOrders": 0}
+
+        run("Purchase request gets a friendly review reply and remains a draft without retailer contact", purchase_reply)
 
         def unsupported(tab):
             before = saved(tab)
@@ -295,6 +439,9 @@ def main():
             assert tab.locator("#storage-warning").is_visible()
             assert re.search(r"not saved|tab only|this tab|backup", tab.locator("#assistant-activity").inner_text(), re.I)
             assert tab.locator("#save-status").inner_text() == "Not saved locally"
+            reply = conversational_reply(tab)
+            assert re.search(r"not saved|couldn(?:'|’)t.*sav|cannot.*sav|unable.*sav|tab only|this tab|backup", reply, re.I), reply
+            assert not re.search(r"(?:I(?:'|’)ve|I have)\s+(?:saved|set)\b", reply, re.I), reply
             tab.locator("#open-settings").click()
             with tab.expect_download() as downloaded:
                 tab.locator("#export-backup").click()
@@ -436,10 +583,10 @@ def main():
     report = {"url": args.url, "sourceHashes": hashes, "results": results,
               "javascriptErrors": errors, "blockedExternalRequests": blocked_requests,
               "limitations": "Browser UI and local state only; no real provider, voice hardware, native Clock alarm or closed-page notification."}
-    (OUT / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     passed = sum(result["result"] == "PASS" for result in results)
     print(json.dumps({"passed": passed, "total": len(results), "javascriptErrors": errors,
-                      "blockedExternalRequests": len(blocked_requests), "report": str(OUT / "report.json")}))
+                      "blockedExternalRequests": len(blocked_requests), "report": str(output / "report.json")}))
     if not results or passed != len(results) or errors or blocked_requests:
         raise SystemExit(1)
 

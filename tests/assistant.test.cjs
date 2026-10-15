@@ -18,6 +18,87 @@ test('grocery capture is an editable local item, never a purchase', () => {
   assert.equal(explicit.draft.title, 'milk');
 });
 
+test('natural get and do grocery requests create local responsibilities or known list items', () => {
+  for (const text of ['Get me a grocery', 'Get groceries', 'Please do the grocery shopping', 'Could you get us some groceries']) {
+    const result = parse(text);
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.draft.title, 'Grocery shopping', text);
+    assert.equal(result.draft.category, 'Shopping', text);
+    assert.equal(result.draft.type, 'task', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.action, undefined, text);
+  }
+  for (const text of ['Get me milk', 'Please get us 2 bottles of milk', 'Could you get some bread']) {
+    const result = parse(text);
+    assert.equal(result.kind, 'grocery', text);
+    assert.equal(result.draft.category, 'Shopping', text);
+    assert.equal(result.action, undefined, text);
+    assert.match(result.message, /No order will be placed/, text);
+  }
+  assert.equal(parse('Get me milk').draft.title, 'milk');
+  assert.equal(parse('Please get us 2 bottles of milk').draft.quantity, '2 bottles');
+  assert.equal(parse('We need milk').draft.title, 'milk');
+  for (const text of ['Get me help', 'Get me a hotel', 'Do milk']) assert.equal(parse(text).kind, 'clarify', text);
+});
+
+test('timed groceries carry an actual future Dubai reminder without promising delivery', () => {
+  for (const [text, kind, title] of [
+    ['Get me groceries tomorrow at 7 pm', 'task', 'Grocery shopping'],
+    ['Do the grocery shopping tomorrow at 7 o’clock pm', 'task', 'Grocery shopping'],
+    ['Get me milk tomorrow at 7 pm', 'grocery', 'milk'],
+    ['We need milk tomorrow at 19:00', 'grocery', 'milk']
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, kind, text);
+    assert.equal(result.draft.title, title, text);
+    assert.equal(result.draft.category, 'Shopping', text);
+    assert.equal(result.draft.dueDate, '2026-10-13', text);
+    assert.equal(result.draft.dueTime, '19:00', text);
+    assert.equal(result.draft.remindAt, Date.parse('2026-10-13T19:00:00+04:00'), text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.equal(result.action, undefined, text);
+  }
+  const dayOnly = parse('Get me milk tomorrow');
+  assert.equal(dayOnly.kind, 'grocery');
+  assert.equal(dayOnly.draft.dueDate, '2026-10-13');
+  assert.equal(dayOnly.draft.remindAt, null);
+});
+
+test('grocery clock ambiguity and past times ask before scheduling', () => {
+  for (const text of [
+    'Get me a grocery at 7 o’clock',
+    'Get groceries at 7 pm',
+    'Get me milk tomorrow at 7',
+    'Get groceries tomorrow at 7 o’clock',
+    'Get me milk today at 7 am',
+    'Get me milk tomorrow at 25:00',
+    'Get me milk tomorrow at 7 pm London time',
+    'Get me milk tomorrow around 7 pm'
+  ]) {
+    const result = parse(text);
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.reminderRequested, true, text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.action, undefined, text);
+  }
+  const original = parse('Get me a grocery at 7 o’clock');
+  assert.equal(original.draft.title, 'Grocery shopping');
+  assert.ok(original.missing.includes('dueDate'));
+  assert.ok(original.missing.includes('dueTime'));
+  assert.match(original.message, /am or 7 pm/i);
+});
+
+test('explicit grocery purchases stay approval drafts even when scheduled', () => {
+  for (const text of ['Buy milk tomorrow at 7 pm', 'Order groceries tomorrow at 7 pm', 'Please purchase milk tomorrow at 7 pm']) {
+    const result = parse(text);
+    assert.equal(result.kind, 'action', text);
+    assert.equal(result.action.kind, 'purchase', text);
+    assert.equal(result.action.status, 'needs_review', text);
+    assert.equal(result.draft, undefined, text);
+    assert.match(result.message, /nothing has been sent, purchased, or booked/i, text);
+  }
+});
+
 test('missing reminder time asks, while an explicit Dubai time creates correct epoch', () => {
   const incomplete = parse('Remind me to call the clinic tomorrow');
   assert.equal(incomplete.kind, 'clarify');

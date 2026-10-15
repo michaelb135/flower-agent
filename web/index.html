@@ -29,6 +29,7 @@
     <main>
 <section class="card assistant-activity" id="assistant-activity" role="status" aria-live="polite" aria-atomic="false" aria-labelledby="assistant-activity-title" hidden>
         <p class="eyebrow">Ask Tidy</p><h2 id="assistant-activity-title" tabindex="-1">Your request</h2>
+        <p id="assistant-activity-reply" class="assistant-reply"></p>
         <ol id="assistant-activity-steps" class="activity-steps"></ol>
         <p id="assistant-activity-message" class="helper"></p>
         <div class="assistant-activity-actions"><button type="button" class="button secondary small" id="assistant-activity-open" hidden>Show me</button><button type="button" class="button text small" id="assistant-activity-dismiss">Dismiss</button></div>
@@ -40,7 +41,7 @@
         <nav class="today-shortcuts" aria-label="Your other sections"><button type="button" class="button secondary small" data-go="inbox">Undated tasks</button><button type="button" class="button secondary small" data-go="upcoming">Coming up</button><button type="button" class="button secondary small" id="today-reminders">Notifications</button><button type="button" class="button secondary small" id="today-appointments">Appointments</button><button type="button" class="button secondary small" id="today-meals">Meals</button></nav>
       </section>
 <section class="view" id="view-assistant" aria-labelledby="assistant-title" hidden>
-        <p class="eyebrow">Tell me what's on your mind</p><h1 id="assistant-title" tabindex="-1">One place to ask.</h1><p class="intro">Add a reminder, task or appointment record. Tidy shows what it saved and asks when something is missing.</p>
+        <p class="eyebrow">Tell me what's on your mind</p><h1 id="assistant-title" tabindex="-1">One place to ask.</h1><p class="intro">Ask for help with a reminder, task or appointment. Tidy replies, opens the right section and shows what it saved.</p>
         <section class="card assistant-card"><div class="assistant-greeting"><span class="assistant-icon" aria-hidden="true">✳</span><div><h2>How can I help?</h2><p class="helper">Tidy understands simple requests using rules. An AI service is not connected.</p></div></div>
           <form id="capture-form"><label for="capture-text">Type a request</label><textarea id="capture-text" rows="3" maxlength="1000" required placeholder="Remind me to call the clinic tomorrow at 3 pm"></textarea><div class="capture-actions"><button type="button" class="button secondary" id="voice-button">Speak a request</button><button class="button" type="submit">Tell Tidy →</button></div></form><p id="voice-status" class="helper" role="status"></p>
           <div class="example-requests"><button data-example="Notify me to call the clinic tomorrow at 6 pm">Remind me at 6 pm</button><button data-example="Appointment: dentist tomorrow at 6 pm">Add an appointment</button><button data-example="We need ketchup">We need ketchup</button><button data-example="Dad: take out bins tomorrow">Give someone a task</button><button data-example="What do I need to do today?">What's on today?</button></div>

@@ -253,17 +253,29 @@
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
   function renderActivity(){
     const activity=ui.activity;$('assistant-activity').hidden=!activity||activity.dismissed;if(!activity)return;
-    $('assistant-activity').dataset.status=activity.status;$('assistant-activity-title').textContent=activity.title;$('assistant-activity-message').textContent=activity.message;
+    $('assistant-activity').dataset.status=activity.status;$('assistant-activity-title').textContent=activity.title;$('assistant-activity-message').textContent=activity.message;$('assistant-activity-reply').textContent=activity.reply;
     const steps=$('assistant-activity-steps');steps.replaceChildren();
     for(const step of activity.steps){const item=el('li',(step.status==='done'?'✓ ':step.status==='error'?'! ':'')+step.label,'activity-step');item.dataset.status=step.status;steps.append(item);}
     $('assistant-activity-open').hidden=!activity.target&&!activity.resume;$('assistant-activity-open').textContent=activity.resume?'Continue with the details':'Show me the result';$('assistant-activity-open').disabled=ui.captureBusy;
     $('assistant-activity-dismiss').disabled=ui.captureBusy;
   }
-  function startActivity(){ui.activity={status:'working',title:'Understanding your request',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();}
+  function startActivity(){ui.activity={status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
   function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
   function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
-  function destination(task){return task.type==='appointment'?'appointments':task.remindAt!==null?'reminders':task.type==='grocery'?'shopping':'family';}
+  function destination(task){return task.type==='appointment'?'appointments':task.type==='grocery'?'shopping':task.remindAt!==null?'reminders':'family';}
   function readableTime(epoch){return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(epoch))+' Dubai time';}
+  function taskReply(task,saved,existing){
+    const title='“'+task.title+'”';
+    if(!saved)return 'I couldn’t save '+title+' on this browser. I’ve kept it in this tab; please download a backup before closing.';
+    let reply;
+    if(task.type==='grocery')reply=existing?title+' is already on your shopping list. I’ve opened it for you.':'Of course—I’ve added '+title+' to your shopping list and opened it for you.';
+    else if(task.type==='appointment')reply='I’ve added '+title+' to your appointments for '+prettyDate(task.dueDate)+' at '+task.dueTime+' Dubai time. Please confirm the booking separately with the provider.';
+    else if(task.remindAt!==null)reply='All set—I’ve saved your reminder for '+title+'.';
+    else reply='Of course—I’ve added '+title+' to your tasks and opened them for you.';
+    if(task.remindAt!==null)reply+=' '+(state.settings.remindersPaused?'Your reminder is set for '+readableTime(task.remindAt)+', but alerts are paused. Open reminder settings to resume them.':'I’ll remind you at '+readableTime(task.remindAt)+'. Keep Tidy open for the alert.');
+    if(task.type==='grocery')reply+=' No order has been placed.';
+    return reply;
+  }
   function revealActivityTarget(focusCard=false){
     const target=ui.activity?.target;if(!target)return;
     const item=state[target.kind==='action'?'actions':'tasks'].find(item=>item.id===target.id);
@@ -278,6 +290,7 @@
     const reminder=task.remindAt!==null,appointment=task.type==='appointment';
     ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;
     ui.activity.status=saved?'done':'error';
+    ui.activity.reply=taskReply(task,saved,existing);
     ui.activity.title=!saved?'Not saved on this browser':existing?'Already on your shopping list':appointment?'Appointment added to your plan':reminder?'Reminder set':task.type==='grocery'?'Added to your shopping list':'Task added';
     let message=task.title+'. ';
     if(reminder)message+='Reminder: '+readableTime(task.remindAt)+'. '+(state.settings.remindersPaused?'Alerts are paused; open reminder settings to resume them.':'Keep Tidy open for this alert.');
@@ -285,12 +298,12 @@
     else if(task.type==='grocery')message+='Your list is ready to review. No order has been placed.';
     else message+='Saved in your responsibilities.';
     if(!saved)message+=' This change is kept in this tab only. Download a backup before closing.';
-    ui.activity.message=message;activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+(appointment?'appointments':reminder?'reminders':task.type==='grocery'?'shopping list':'responsibilities'));
+    ui.activity.message=message;activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+({appointments:'appointments',reminders:'reminders',shopping:'shopping list',family:'responsibilities'})[destination(task)]);
     response(message);revealActivityTarget();renderActivity();
   }
   function waitForTaskDetails(text,result){
     const draft=result.draft||{title:text,category:'Home'},flow={text,result};ui.lastDraft=draft;
-    ui.activity.status='waiting';ui.activity.title='A little more information';ui.activity.message=result.message;activityStep(0,'done');activityStep(1,'working','Waiting for your details');
+    ui.activity.status='waiting';ui.activity.title='A little more information';ui.activity.reply='I can help, but I need a little more detail before I save anything. Please check the details below.';ui.activity.message=result.message;activityStep(0,'done');activityStep(1,'working','Waiting for your details');
     const resume=()=>openTask(draft,null,result.message,result.reminderRequested===true,flow);ui.activity.resume=resume;
     $('assistant-followup').append(button('Fill in the missing details',resume,'button'));
     if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){showView(draft.type==='appointment'?'appointments':'reminders');resume();}
@@ -301,8 +314,9 @@
     try{
       await paintActivity();if(refreshSavedData())renderAll();
       const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks});response(result.message);activityStep(0,'done');
-      if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
+      if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.reply='Here’s what I found in Tidy. '+result.message;ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
       if(result.kind==='clarify'){waitForTaskDetails(text,result);return;}
+      ui.activity.reply=result.kind==='action'?'Of course—I’m preparing a draft for you to review.':result.kind==='grocery'?'Of course—I’m checking your shopping list for “'+result.draft.title+'”.':result.draft.type==='appointment'?'Of course—I’m adding that appointment to your plan.':result.draft.remindAt!==null?'Of course—I’m setting up your reminder.':'Of course—I’m adding that to your tasks.';
       activityStep(1,'working',result.kind==='action'?'Preparing your draft':'Saving your item');await paintActivity();
       if(refreshSavedData())renderAll();
       if(result.kind==='action'){
@@ -310,19 +324,23 @@
         state=C.validateSnapshot({...state,actions:[...state.actions,action]});const saved=save();renderAll();
         ui.activity.target={kind:'action',id:action.id};ui.activity.status=saved?'done':'error';ui.activity.title=saved?(action.kind==='booking'?'Appointment request ready for review':'Draft ready for review'):'Draft kept in this tab only';
         ui.activity.message='Prepared: '+action.title+'. '+(saved?'Saved on this browser.':'Not saved locally; download a backup before closing.')+' Your approval is needed. Nothing has been booked, purchased or sent.';
+        ui.activity.reply=saved?'I’ve prepared your '+(action.kind==='booking'?'appointment':action.kind==='purchase'?'purchase':'message')+' request for review. Nothing has been booked, purchased or sent.':'I’ve prepared your request in this tab, but I couldn’t save it. Please download a backup before closing. Nothing has been booked, purchased or sent.';
         activityStep(1,saved?'done':'error',saved?'Saved a draft for review':'Local saving failed');revealActivityTarget();activityStep(2,'done',action.kind==='booking'?'Opened appointment requests':'Opened your requests');response(ui.activity.message);$('assistant-followup').append(button('Review draft',()=>openAction(action,action.id)));return;
       }
       const draft=result.draft;
       if(result.kind==='grocery'){
         const existing=state.tasks.find(task=>task.status==='open'&&task.type==='grocery'&&task.title.toLocaleLowerCase()===draft.title.toLocaleLowerCase());
         if(existing){
-          finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);
-          if(existing.quantity&&draft.quantity&&existing.quantity!==draft.quantity){ui.activity.status='waiting';ui.activity.message='This item already has a different quantity. Review it before changing the amount.';ui.activity.resume=()=>openTask({...existing,quantity:draft.quantity},existing.id,ui.activity.message,false,{text,result});response(ui.activity.message);$('assistant-followup').append(button('Review item',ui.activity.resume));renderActivity();}
+          const reminderPatch=draft.remindAt!==null?{dueDate:draft.dueDate,dueTime:draft.dueTime,remindAt:draft.remindAt}:{};
+          if(existing.quantity&&draft.quantity&&existing.quantity!==draft.quantity){
+            finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);ui.activity.status='waiting';ui.activity.reply='“'+existing.title+'” is already on your list with a different quantity. Please review the amount before I change it.';ui.activity.message='This item already has a different quantity. Review it before changing the amount.';ui.activity.resume=()=>openTask({...existing,...reminderPatch,quantity:draft.quantity},existing.id,ui.activity.message,draft.remindAt!==null,{text,result});response(ui.activity.message);$('assistant-followup').append(button('Review item',ui.activity.resume));renderActivity();
+          }else if(draft.remindAt!==null){const updated=C.updateTask(state,existing.id,reminderPatch),saved=save();renderAll();finishTaskActivity(updated,saved,true);}
+          else finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);
           return;
         }
       }
       const created=C.createTask(state,draft);const saved=save();renderAll();finishTaskActivity(created,saved);$('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));
-    }catch(problem){ui.activity.status='error';ui.activity.title='This request could not be completed';ui.activity.message=problem.message+' Check the details and try again.';const step=ui.activity.steps.find(step=>step.status==='working');if(step)step.status='error';response(ui.activity.message);renderActivity();}
+    }catch(problem){ui.activity.status='error';ui.activity.title='This request could not be completed';ui.activity.reply='I couldn’t finish that request. Please check the details and try again.';ui.activity.message=problem.message+' Check the details and try again.';const step=ui.activity.steps.find(step=>step.status==='working');if(step)step.status='error';response(ui.activity.message);renderActivity();}
     finally{ui.captureBusy=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;$('capture-form').removeAttribute('aria-busy');renderActivity();}
   }
   function quickTaskChoices(flow){
@@ -333,7 +351,7 @@
     const clock=flow.text.match(/\bat\s+(\d{1,2})(?:\s*o['’]?clock)?(?=\s|[.,!?]|$)/i),hour=Number(clock?.[1]);
     if(!$('task-time').value&&hour>=1&&hour<=12)for(const [label,clockHour] of [[hour+' am',hour%12],[hour+' pm',hour%12+12]])target.append(button(label,()=>{$('task-time').value=String(clockHour).padStart(2,'0')+':00';sync();}));
   }
-  function cancelTaskCapture(){if(!ui.taskCapture)return;ui.taskCapture=null;ui.activity.status='waiting';ui.activity.title='Details have not been saved';ui.activity.message='Nothing new has been saved. Continue with the details when you are ready.';renderActivity();}
+  function cancelTaskCapture(){if(!ui.taskCapture)return;ui.taskCapture=null;ui.activity.status='waiting';ui.activity.title='Details have not been saved';ui.activity.reply='That’s okay—I haven’t saved anything new. You can continue with the details when you’re ready.';ui.activity.message='Nothing new has been saved. Continue with the details when you are ready.';renderActivity();}
   function openTask(draft={},editingId=null,message='',requestReminder=false,flow=null){
     ui.taskCapture=flow;
     ui.editingTask=editingId;ui.taskBaseline=editingId?copy(state.tasks.find(task=>task.id===editingId)||null):null;error('task-error','');$('task-dialog-title').textContent=editingId?'Edit task':'Add a task';$('task-draft-message').textContent=message;
