@@ -21,7 +21,7 @@ if output == source or source in output.parents or output == repo or output in s
 output.mkdir(parents=True, exist_ok=True)
 if any(output.iterdir()):
     raise SystemExit('Build output must be an empty directory.')
-names = ['index.html', 'styles.css', 'app.js', 'core.js', 'assistant.js', 'meals.html']
+names = ['index.html', 'styles.css', 'app.js', 'core.js', 'assistant.js', 'calendar.js', 'planner.js', 'meals.html']
 hashes = {}
 for name in names:
     original = source / name

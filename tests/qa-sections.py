@@ -23,13 +23,16 @@ OUT = ROOT / ".qa-results" / "sections"
 KEY = "tidy.app.v1"
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 HUB_PAGES = ["meals", "shopping", "stores", "appointments", "routines",
-             "household", "requests", "health", "inbox", "upcoming"]
+             "household", "requests", "health", "inbox", "upcoming",
+             "calendar", "planning", "planning-settings"]
 PRIMARY_CONTROLS = {
     "meals": "#meal-tab-breakfast", "shopping": "#shopping-card",
     "stores": "#provider-list", "appointments": "#appointments-add",
     "routines": "#add-routine", "household": "#add-member",
     "requests": "#new-action", "health": "#health-square-form",
     "inbox": "#inbox-tasks", "upcoming": "#upcoming-tasks",
+    "calendar": "#calendar-file", "planning": "#planning-run",
+    "planning-settings": "#planning-settings-save",
 }
 FIXTURE = """(() => {
   window.__rejectTidyWrites = false;
@@ -132,6 +135,8 @@ def main():
             tab.clock.set_fixed_time(datetime(2026, 10, 15, 6, 0, tzinfo=timezone.utc))
             tab.goto(args.url + suffix)
             tab.wait_for_function("!!window.TidyDemo && TidyDemo.getState().mealSnapshot !== null")
+            if tab.locator("#calendar-onboarding-dialog").is_visible():
+                tab.locator("#calendar-onboarding-later").click()
             return tab
 
         def run(name, check, width=1100):

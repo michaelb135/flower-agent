@@ -132,6 +132,8 @@ with sync_playwright() as playwright:
         global baseline
         page.goto(URL)
         page.wait_for_function("window.TidyDemo && TidyDemo.getState().mealSnapshot!==null")
+        if page.locator("#calendar-onboarding-dialog").is_visible():
+            page.locator("#calendar-onboarding-later").click()
         page.locator('[data-view="family"]').click()
         page.locator("#family-add").click()
         page.locator("#task-title").fill("Keep the family responsibility")

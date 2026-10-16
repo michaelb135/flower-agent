@@ -8,6 +8,9 @@
   const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const CATEGORY_NAMES = ['Work', 'Home', 'School', 'Shopping', 'Health'];
   const GROCERY_WORDS = /\b(?:ketchup|milk|bread|eggs?|rice|pasta|chicken|fish|potatoes?|tomatoes?|cheese|butter|yogu?rt|fruit|apples?|bananas?|onions?|carrots?|salt|pepper|oil|flour|sugar|tea|coffee|water|juice|cereal|lettuce|cucumber|garlic|soap|toilet paper|tissues|detergent)\b/i;
+  const NATURAL_TASK_PREFIX = /^(?:please\s+)?(?:i|we)\s+(?:have|need)\s+to\s+(.+)$/i;
+  const PERSONAL_TASK_VERB = /^(?:do|help|check|review|pack|prepare|finish|complete|work|clean|tidy|take|pick|drop|collect|drive|walk|exercise|study|read|call|plan|organise|organize|spend|write|practise|practice|make|cook)\b/i;
+  const EXTERNAL_APP_ACCESS = /\b(?:read|access|check|sync|connect|import|fetch|search|retrieve|open|scan|delete)\b[\s\S]*\b(?:WhatsApp|Gmail|Outlook|Google Calendar|Apple Calendar|iCloud|(?:my|our|all|the)\s+(?:emails?|messages?|calendars?))\b/i;
   const pad = (n) => String(n).padStart(2, '0');
   const escapeRE = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -243,6 +246,16 @@
     if (/\bassign(?:ed)? to\b/i.test(text)) assignmentProblem = 'Choose a known family member for the assignment.';
     if (assignmentProblem) draft.assigneeId = null;
 
+    let naturalTaskRequested = false;
+    const stripNaturalTaskPrefix = (value) => {
+      const match = value.match(NATURAL_TASK_PREFIX);
+      if (!match) return value;
+      if (PERSONAL_TASK_VERB.test(match[1]) && !EXTERNAL_APP_ACCESS.test(match[1])) naturalTaskRequested = true;
+      return match[1];
+    };
+    text = stripNaturalTaskPrefix(text);
+    if (/^(?:please\s+)?help\s+(?:(?:me|us)\s+)?(?:(?:the|my|our)\s+)?(?:kids|children)\b.*\b(?:homework|schoolwork|school work|study|studies)\b/i.test(text)) naturalTaskRequested = true;
+
     const reminderRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:remind|notify)\s+(?:me|us)|(?:set|create|add|schedule|put|make|do)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?(?:reminder|notification|alarm)\b(?:\s+for\s+(?:me|us))?|(?:reminder|notification|alarm)\s*:)(?:\s+(?:to|about)\b)?\s*:?\s*/i;
     let isReminder = reminderRE.test(text);
     if (isReminder) {
@@ -261,31 +274,44 @@
     };
 
     // Requests to spend money, contact someone or arrange bookings are drafts only.
-    const actionMatch = !isReminder && text.match(/^(?:please\s+)?(?:(?:can|could) you\s+)?(book|reserve|schedule(?=\s+(?:(?:an?|the)\s+)?appointment\b)|buy|purchase|order|send(?:\s+(?:a|the))?\s+message|message|email|contact)\b\s*(.*)/i);
-    if (actionMatch) {
-      if (text.length > 300) return clarify('Please shorten the action request to 300 characters or fewer. Nothing has been sent, purchased, or booked.');
+    const prepareAction = (request) => {
+      const actionMatch = request.match(/^(?:please\s+)?(?:(?:can|could) you\s+)?(book|reserve|schedule(?=\s+(?:(?:an?|the)\s+)?appointment\b)|buy|purchase|order|send(?:\s+(?:a|the))?\s+message|message|email|contact)\b\s*(.*)/i);
+      if (!actionMatch) return null;
+      if (request.length > 300) return clarify('Please shorten the action request to 300 characters or fewer. Nothing has been sent, purchased, or booked.');
       const verb = actionMatch[1].toLowerCase();
       const kind = /book|reserve|schedule/.test(verb) ? 'booking' : /buy|purchase|order/.test(verb) ? 'purchase' : 'message';
-      const action = { kind, status: 'needs_review', title: text, details: text, createdFrom: 'local-capture' };
+      const action = { kind, status: 'needs_review', title: request, details: request, createdFrom: 'local-capture' };
       const noun = kind === 'booking' ? 'booking request' : kind === 'purchase' ? 'purchase request' : 'message request';
       return {
         kind: 'action', action,
         message: `I can prepare a ${noun} for your wife's review. This is a local draft: nothing has been sent, purchased, or booked. Provider support has not been verified.`
       };
-    }
+    };
+    const directAction = !isReminder && prepareAction(text);
+    if (directAction) return directAction;
 
-    let recognised = isReminder || draft.assigneeId !== null;
+    let recognised = isReminder || draft.assigneeId !== null || naturalTaskRequested;
+    let explicitTaskRequested = false;
     let categoryExplicit = false;
     const categoryPrefix = text.match(/^(?:add\s+(?:a\s+)?)?(work|home|school|shopping|health)(?:\s+task)?\s*:\s*/i);
     if (categoryPrefix) {
       draft.category = CATEGORY_NAMES.find((category) => category.toLowerCase() === categoryPrefix[1].toLowerCase());
       categoryExplicit = true;
       recognised = true;
+      explicitTaskRequested = true;
       text = text.slice(categoryPrefix[0].length);
     }
     if (/^(?:please\s+)?(?:add|create)\s+(?:a\s+)?task\s*:?\s*/i.test(text)) {
       recognised = true;
+      explicitTaskRequested = true;
       text = text.replace(/^(?:please\s+)?(?:add|create)\s+(?:a\s+)?task\s*:?\s*/i, '');
+    }
+    const beforeNaturalPrefix = text;
+    text = stripNaturalTaskPrefix(text);
+    if (text !== beforeNaturalPrefix) {
+      if (naturalTaskRequested) recognised = true;
+      const nestedAction = !isReminder && prepareAction(text);
+      if (nestedAction) return nestedAction;
     }
     const appointmentRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:add|create|make|do|put)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?)?appointment(?:\s*:\s*|\s+|$)/i;
     if (appointmentRE.test(text)) {
@@ -317,7 +343,7 @@
       text = groceryPrefix ? groceryPrefix[1] : groceryAdd ? groceryAdd[1] : outOf ? (outOf[1] || outOf[2]) : need && GROCERY_WORDS.test(need[1]) ? need[1] : getGrocery[1];
     }
     if (!categoryExplicit && draft.type === 'task') {
-      if (/\b(?:school|homework|PE kit)\b/i.test(text)) draft.category = 'School';
+      if (/\b(?:school|homework|schoolwork|PE kit)\b/i.test(text) || (/\b(?:kids|children)\b/i.test(text) && /\b(?:work|study|studies|learning|reading)\b/i.test(text))) draft.category = 'School';
       else if (/\b(?:clinic|hospital|dentist|doctor|medical)\b/i.test(text)) draft.category = 'Health';
     }
 
@@ -338,6 +364,7 @@
     if (!draft.title) missing.push('title');
     if (draft.title.length > 300) return needDetails('Please shorten the task title to 300 characters or fewer. The editable draft has not been saved.', draft, ['title']);
     if ((isReminder || draft.type === 'appointment' || draft.repeat !== 'none') && !draft.dueDate) missing.push('dueDate');
+    if (!missing.includes('dueDate') && (naturalTaskRequested || explicitTaskRequested) && when.clockRequested && !draft.dueDate) missing.push('dueDate');
     if ((isReminder || draft.type === 'appointment') && !draft.dueTime) missing.push('dueTime');
     if (assignmentProblem) missing.push('assigneeId');
     if (when.problems.length) {
@@ -357,11 +384,13 @@
       return needDetails('I am not sure what you want me to do. You can edit this Home task draft, or start with “Add task”, “Remind me”, “Appointment:”, or “Add … to the shopping list”. Nothing has been saved.', draft, ['intent']);
     }
     const categoryNote = draft.category === 'Home' && !categoryExplicit ? ' The category defaults to Home and can be changed.' : '';
+    const flexibleTask = (naturalTaskRequested || explicitTaskRequested) && draft.type === 'task' && !isReminder && !when.clockRequested && !draft.dueTime && draft.remindAt === null && !EXTERNAL_APP_ACCESS.test(text) && !prepareAction(text);
     if (draft.type === 'grocery') {
       return { kind: 'grocery', draft, ...(isReminder ? { reminderRequested: true } : {}), message: `Review this shared grocery-list item and save it locally. No order will be placed.${categoryNote}` };
     }
     return {
       kind: 'task', draft,
+      ...(flexibleTask ? { flexibleTaskRequested: true, ...(opts.planningEnabled === true ? { autoPlanRequested: true } : {}) } : {}),
       ...(isReminder ? { reminderRequested: true } : {}),
       ...(appointmentRequested ? { appointmentRequested: true } : {}),
       message: draft.type === 'appointment'

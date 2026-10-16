@@ -48,6 +48,10 @@
     if (typeof value !== 'boolean') fail(label + ' must be true or false.');
     return value;
   }
+  function integer(value, minimum, maximum, label) {
+    if (!Number.isInteger(value) || value < minimum || value > maximum) fail(label + ' must be a whole number from ' + minimum + ' to ' + maximum + '.');
+    return value;
+  }
   function date(value, label, empty) {
     if (empty && (value === undefined || value === '')) return '';
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) fail('Invalid ' + label + '; use YYYY-MM-DD.');
@@ -149,6 +153,8 @@
     if (result.status === 'open' && result.completedAt !== null) fail('An open task cannot have a completion time.');
     if (result.status === 'done' && result.completedAt === null) fail('A completed task needs a completion time.');
     if (input.seriesId !== undefined) result.seriesId = string(input.seriesId, '', 120, 'Series ID', true);
+    if (input.durationMinutes !== undefined) result.durationMinutes = integer(input.durationMinutes, 5, 480, 'Task duration');
+    if (input.planningReason !== undefined) result.planningReason = string(input.planningReason, '', 1000, 'Planning reason');
     return result;
   }
   function cleanAction(input) {
@@ -215,6 +221,40 @@
     }
     return result;
   }
+  function cleanPlanningProfile(value) {
+    object(value, 'Family routine');
+    const result = { enabled: bool(value.enabled, false, 'Automatic planning'), workDays: list(value.workDays, 7, 'Work days').map(day => integer(day, 0, 6, 'Work day')), schoolDays: list(value.schoolDays === undefined ? value.workDays : value.schoolDays, 7, 'School days').map(day => integer(day, 0, 6, 'School day')) };
+    if (new Set(result.workDays).size !== result.workDays.length) fail('Each work day should appear once.');
+    if (new Set(result.schoolDays).size !== result.schoolDays.length) fail('Each school day should appear once.');
+    result.workDays.sort();result.schoolDays.sort();
+    for (const field of ['workStart', 'workEnd', 'kidsHome', 'dayStart', 'dayEnd']) result[field] = time(value[field], field);
+    if (result.workStart >= result.workEnd) fail('Work must finish after it starts.');
+    if (result.dayStart >= result.dayEnd) fail('The planning day must finish after it starts.');
+    result.taskMinutes = integer(value.taskMinutes, 5, 240, 'Usual task length');
+    result.familyMinutes = integer(value.familyMinutes, 5, 240, 'Family task length');
+    result.bufferMinutes = integer(value.bufferMinutes, 0, 120, 'Time between commitments');
+    return result;
+  }
+  function cleanCalendar(value) {
+    object(value, 'Imported calendar');
+    const result = {
+      sourceName: string(value.sourceName, '', 120, 'Calendar file name', true),
+      importedAt: reminderEpoch(value.importedAt, 'calendar import time'),
+      windowStart: reminderEpoch(value.windowStart, 'calendar window start'),
+      windowEnd: reminderEpoch(value.windowEnd, 'calendar window end'),
+      events: list(value.events, 1000, 'Calendar events').map(event => {
+        object(event, 'Calendar event');
+        const item = { id: string(event.id, '', 120, 'Calendar event ID', true), title: string(event.title, '', 500, 'Calendar event title', true), startAt: reminderEpoch(event.startAt, 'event start'), endAt: reminderEpoch(event.endAt, 'event end'), allDay: bool(event.allDay, false, 'All-day event') };
+        if (item.endAt <= item.startAt) fail('Calendar events must finish after they start.');
+        if (event.sourceUid !== undefined) item.sourceUid = string(event.sourceUid, '', 500, 'Calendar event source');
+        return item;
+      }),
+      warnings: list(value.warnings === undefined ? [] : value.warnings, 20, 'Calendar notes').map(note => string(note, '', 1000, 'Calendar note', true))
+    };
+    if (result.windowEnd <= result.windowStart || result.windowEnd - result.windowStart > 366 * DAY_MS) fail('Invalid imported calendar date range.');
+    unique(result.events, 'calendar event');
+    return result;
+  }
   function validateSnapshot(data) {
     object(data, 'Backup');
     if (data.schemaVersion !== 1) fail('Unsupported backup version.');
@@ -245,6 +285,8 @@
     // Keep old backups byte-for-byte stable: manual breakfast/lunch plans are
     // optional until someone saves one, rather than expanding every old state.
     if (data.mealPlans !== undefined) result.mealPlans = cleanMealPlans(data.mealPlans);
+    if (data.planningProfile !== undefined) result.planningProfile = cleanPlanningProfile(data.planningProfile);
+    if (data.calendar !== undefined) result.calendar = cleanCalendar(data.calendar);
     if (bytes(JSON.stringify(result)) > BACKUP_LIMIT) fail('Backup exceeds the 1 MiB limit.');
     return result;
   }
@@ -305,6 +347,7 @@
     }
     const next = { ...task, ...patch };
     const scheduleChanged = (patch.dueDate !== undefined && patch.dueDate !== task.dueDate) || (patch.dueTime !== undefined && patch.dueTime !== task.dueTime);
+    if (scheduleChanged && task.planningReason && !Object.prototype.hasOwnProperty.call(patch, 'planningReason')) next.planningReason = '';
     if (scheduleChanged && !Object.prototype.hasOwnProperty.call(patch, 'remindAt')) next.remindAt = null;
     const reminderChanged = Object.prototype.hasOwnProperty.call(patch, 'remindAt') && patch.remindAt !== task.remindAt;
     if ((scheduleChanged || reminderChanged) && !Object.prototype.hasOwnProperty.call(patch, 'deliveredReminderAt')) next.deliveredReminderAt = null;

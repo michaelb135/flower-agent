@@ -64,6 +64,8 @@ def main():
             tab.on("pageerror", lambda problem: errors.append(str(problem)))
             tab.goto(args.url)
             tab.wait_for_function("!!window.TidyDemo && TidyDemo.getState().mealSnapshot !== null")
+            if tab.locator("#calendar-onboarding-dialog").is_visible():
+                tab.locator("#calendar-onboarding-later").click()
             section(tab, "health")
             return tab
 

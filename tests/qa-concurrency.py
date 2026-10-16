@@ -202,6 +202,8 @@ def main():
             tab.wait_for_function("!!window.TidyDemo")
             if wait_meal:
                 tab.wait_for_function("TidyDemo.getState().mealSnapshot !== null")
+            if tab.locator("#calendar-onboarding-dialog").is_visible():
+                tab.locator("#calendar-onboarding-later").click()
             return tab
 
         def run(name, scenario):

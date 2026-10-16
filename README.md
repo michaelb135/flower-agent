@@ -1,8 +1,16 @@
 # Tidy website
 
-A web app for household tasks, quick requests, assignments, routines, meal planning and grocery preparation. The deployable site is in `web/`. Only the six reviewed runtime files are published; tests, screenshots and any saved user data are excluded.
+A web app for household tasks, quick requests, assignments, routines, family planning, calendar-file import and grocery preparation. The deployable site is in `web/`. Only the eight reviewed runtime files are published; tests, screenshots and any saved user data are excluded.
 
 ## This change
+
+The first visit offers calendar setup or **Not now**. This is an introduction to file import, not a simulated iPhone permission sheet. **Sections → Calendar** imports a user-selected `.ics` snapshot locally. The website cannot read the phone's Calendar database, and no live Google, Microsoft or iCloud connection or cross-device storage is configured. Importing a fresh file refreshes the snapshot; an invalid or unsupported file leaves the previous calendar intact.
+
+**My usual hours** confirms separate workdays and school days, work hours, children returning home, planning limits, task lengths and buffers. Starting values are editable examples and automatic planning remains off until enabled. After confirmation, a request such as “I have to do work with the kids” gets an actual task time after applicable work/school hours, avoiding imported commitments and existing timed responsibilities. Tidy saves its duration, explanation and browser reminder, then opens **My day plan**. Without confirmed hours, it saves an untimed task and offers setup. **Organise my day** fits flexible tasks into the selected day, leaves fixed dates and appointments in place, and reports tasks that cannot fit. It does not contact providers or write to an external calendar.
+
+Calendar imports cover a bounded 60-day window and up to 1,000 occurrences, including overlapping events. Supported recurrence is daily/weekly with bounded intervals, counts, end dates and exclusions. Unknown time zones, ambiguous daylight-saving times, monthly/advanced recurrence and recurrence overrides reject the whole import rather than silently dropping busy time. Local floating times use Dubai time with an explicit import note. Planning checks each proposed slot against the exact imported coverage window; stale snapshots need re-importing. Calendar export downloads the next seven days of actual timed tasks and repeating occurrences for manual review/import; it does not create calendar alarms or an ongoing recurring series.
+
+Calendar data, confirmed hours and optional task duration/explanations are included in Tidy backups. Older backups retain their original shape until the new features are saved. The responsive website works at phone, tablet and desktop widths; importing on one device does not sync private data to another device. Native phone-calendar permissions, provider OAuth configuration and secure cloud storage are separate remaining integration work.
 
 Tidy now has five main buttons: **Today**, **Ask Tidy**, **Tasks**, **Notifications** and **Sections**. Sections is a navigation menu: meals, shopping lists, shopping websites, appointments, routines, household names, review requests, the clinic website, undated tasks and upcoming tasks each open their own focused page. Existing saved tasks and dinner plans are retained.
 
@@ -34,7 +42,9 @@ The original `tidy-day-organiser.jocundridge128.chatgpt.site` hosting project is
 
 ## Development checks
 
-Run `node --test tests/core.test.cjs tests/assistant.test.cjs`, `python3 tools/check_inline_scripts.py web/index.html web/meals.html`, and `python3 -m unittest discover -s tests -p 'test_inline_scripts.py'`. The publishing workflow checks both external and inline JavaScript before building.
+Run `node --test tests/core.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs`, `python3 tools/check_inline_scripts.py web/index.html web/meals.html`, and `python3 -m unittest discover -s tests -p 'test_inline_scripts.py'`. The publishing workflow checks both external and inline JavaScript before building.
+
+Run `python3 tests/qa-planning.py --url http://127.0.0.1:8780/ --output .qa-results/planning/local` for real calendar-file import/export, first-visit setup, confirmed school/work availability, scheduled tasks and reminders, fixed appointment preservation, no-fit handling, backups, conflicting edits, failed writes and phone-sized layouts. It uses synthetic data and blocks requests outside the selected Tidy origin; it does not establish native calendar access or cross-device sync.
 
 For browser checks, serve `web/` internally on port 8780 and run `python3 tests/qa-website.py --url http://127.0.0.1:8780/`. The runner uses isolated synthetic data and intercepted retailer pages. It checks the four store destinations, failure recovery, deliberate direct opening, retry/close behavior, saved tasks/meals and narrow layouts. Do not present an internal localhost address as the published app or describe retailer fixtures as verified live login/checkout.
 

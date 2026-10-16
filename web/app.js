@@ -1,13 +1,16 @@
 /* UI for Tidy's web app. Provider actions remain manual drafts. */
 (function () {
   'use strict';
-  const C=window.TidyCore, A=window.TidyAssistant, KEY='tidy.app.v1';
+  const C=window.TidyCore, A=window.TidyAssistant, P=window.TidyPlanner, CAL=window.TidyCalendar, KEY='tidy.app.v1', WELCOME_KEY='tidy.calendar-welcome.v1';
   const GROCERY_STORES=Object.freeze({Carrefour:{name:'Carrefour UAE',url:'https://www.carrefouruae.com/'},Waitrose:{name:'Waitrose UAE',url:'https://www.waitrose.ae/'},Kibsons:{name:'Kibsons',url:'https://www.kibsons.com/'}});
   const $=id=>document.getElementById(id);
   const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
+  Object.assign(ui,{planningEditing:false,planningBaseline:null,planningStatus:'',planResults:new Map(),calendarImportBusy:false,welcomeChoice:null});
+  const PROFILE_FIELDS=['enabled','workDays','schoolDays','workStart','workEnd','kidsHome','dayStart','dayEnd','taskMinutes','familyMinutes','bufferMinutes'];
+  const PROFILE_INPUTS={workStart:'work-start',workEnd:'work-end',kidsHome:'kids-home',dayStart:'day-start',dayEnd:'day-end',taskMinutes:'task-minutes',familyMinutes:'family-minutes',bufferMinutes:'buffer-minutes'};
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
   function button(text,handler,cls='button secondary small'){const node=el('button',text,cls);node.type='button';node.addEventListener('click',handler);return node;}
   function error(id,text){$(id).textContent=text;$(id).hidden=!text;}
@@ -75,7 +78,7 @@
   }
   function showView(view,focus=true){
     const parts=view.split('/');view=parts[0];if(view==='meals'&&MEAL_SLIDES.includes(parts[1]))ui.mealSlide=parts[1];
-    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming'].includes(view))view='today';
+    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming','calendar','planning','planning-settings'].includes(view))view='today';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
     const parentView=['today','assistant','family','reminders','tools'].includes(view)?view:'tools';
@@ -100,6 +103,8 @@
     copy.append(metadata);let when=task.dueDate?`${prettyDate(task.dueDate)}${task.dueTime?' · '+task.dueTime:''}`:'Choose a date when ready';
     if(task.status==='open'&&task.dueDate&&task.dueDate<C.today())when+=' · unfinished';copy.append(el('div',when,'task-time'));
     if(task.remindAt!==null)copy.append(el('div',`${task.deliveredReminderAt===task.remindAt?'Alert shown':'Alert set'} · ${clockValue(task.remindAt).replace('T',' ')} Dubai`,'task-time'));
+    if(task.durationMinutes)copy.append(el('div',task.durationMinutes+' minutes','task-time'));
+    if(task.planningReason)copy.append(el('p',task.planningReason,'helper'));
     top.append(copy);const done=button(task.status==='done'?'↶':'✓',()=>mutate(()=>{const latest=state.tasks.find(item=>item.id===task.id);if(!latest||latest.status!==task.status)throw Error('This task changed in another tab. Review its current status before changing it.');return task.status==='done'?C.reopenTask(state,task.id):C.completeTask(state,task.id);},task.status==='done'?'Reopened':'Marked done'),'done-button');done.setAttribute('aria-label',(task.status==='done'?'Reopen ':'Complete ')+task.title);top.append(done);row.append(top);
     if(task.notes&&!compact)row.append(el('p',task.notes));
     const actions=el('div',undefined,'task-actions');actions.append(button('Edit',()=>openTask(task,task.id)));
@@ -219,7 +224,127 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();
+  }
+  function planningProfile(){return state.planningProfile||P.defaults();}
+  function beginPlanningEdit(){if(!ui.planningEditing){ui.planningEditing=true;ui.planningBaseline=copy(planningProfile());}}
+  function renderPlanningProfile(){
+    const profile=planningProfile();
+    if(!ui.planningEditing){
+      $('planning-enabled').checked=profile.enabled;
+      for(const box of document.querySelectorAll('[name="planning-workday"]'))box.checked=profile.workDays.includes(Number(box.value));
+      for(const box of document.querySelectorAll('[name="planning-schoolday"]'))box.checked=profile.schoolDays.includes(Number(box.value));
+      for(const [field,suffix] of Object.entries(PROFILE_INPUTS))$('planning-'+suffix).value=profile[field];
+      ui.planningBaseline=copy(profile);
+    }
+    $('planning-settings-status').textContent=ui.saveFailed||ui.storageLocked?'Local saving needs attention. Download a backup before closing.':ui.planningStatus||(profile.enabled?'Your confirmed hours are saved. Tidy can choose times and reminders for flexible tasks.':'These are editable examples. Confirm your hours and enable planning to let Tidy choose times.');
+  }
+  function savePlanningProfile(event){
+    event.preventDefault();error('planning-settings-error','');
+    try{
+      refreshSavedData();const draft={enabled:$('planning-enabled').checked,workDays:[...document.querySelectorAll('[name="planning-workday"]:checked')].map(box=>Number(box.value)).sort(),schoolDays:[...document.querySelectorAll('[name="planning-schoolday"]:checked')].map(box=>Number(box.value)).sort()};
+      for(const [field,suffix] of Object.entries(PROFILE_INPUTS))draft[field]=field.endsWith('Minutes')?Number($('planning-'+suffix).value):$('planning-'+suffix).value;
+      const profile=mergeFields(ui.planningBaseline||planningProfile(),planningProfile(),draft,PROFILE_FIELDS),candidate=C.validateSnapshot({...state,planningProfile:profile});
+      state=candidate;const saved=save();
+      if(saved){ui.planningEditing=false;ui.planningStatus=profile.enabled?'Your hours are saved. Ask Tidy to plan a flexible task, or use Organise my day.':'Your hours are saved. Automatic planning is switched off.';}
+      else {ui.planningEditing=true;ui.planningBaseline=copy(state.planningProfile);ui.planningStatus='Your hours are kept in this tab only; download a backup before closing.';}
+      renderAll();
+    }catch(problem){error('planning-settings-error',problem.message);ui.planningStatus='Your entered hours have not replaced the saved routine.';renderPlanningProfile();}
+  }
+  function calendarCoverage(date){
+    if(!state.calendar)return '';
+    return date<C.today(state.calendar.windowStart)||date>C.today(state.calendar.windowEnd-1)?'The imported calendar does not cover this day. Import a fresh file before I choose a time.':'';
+  }
+  function calendarSlotCoverage(proposal){
+    if(!state.calendar)return '';const start=C.dueEpoch(proposal.date,proposal.time),end=start+proposal.durationMinutes*60000;
+    return start<state.calendar.windowStart||end>state.calendar.windowEnd?'The imported calendar does not cover this time. Import a fresh file before I choose a time.':'';
+  }
+  function calendarEventCard(event){
+    const row=el('article',undefined,'task-row');row.dataset.calendarId=event.id;row.append(el('div',event.title,'task-title'));
+    row.append(el('div',event.allDay?'All day · '+prettyDate(C.today(event.startAt)):readableTime(event.startAt)+' to '+new Intl.DateTimeFormat('en-GB',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(event.endAt)),'task-time'));
+    row.append(el('p','Imported calendar commitment · fixed time','helper'));return row;
+  }
+  function renderCalendar(){
+    const calendar=state.calendar,events=$('calendar-events');events.replaceChildren();$('calendar-remove').disabled=!calendar;$('calendar-file').disabled=ui.calendarImportBusy;
+    if(!calendar){$('calendar-status').textContent='No calendar file imported. Tidy cannot see your phone’s calendar.';$('calendar-window').textContent='Import a file to include its commitments in planning.';empty(events,'Your imported events will appear here.');return;}
+    $('calendar-status').textContent=calendar.events.length+' imported commitments from '+calendar.sourceName+'. '+(ui.saveFailed||ui.storageLocked?'Kept in this tab only; download a backup before closing.':'Saved snapshot on this browser. This is not live sync.');
+    $('calendar-window').textContent='Snapshot covers '+readableTime(calendar.windowStart)+' to '+readableTime(calendar.windowEnd)+'. Last imported '+readableTime(calendar.importedAt)+'. '+calendar.warnings.join(' ');
+    for(const event of calendar.events.slice().sort((a,b)=>a.startAt-b.startAt))events.append(calendarEventCard(event));
+    if(!calendar.events.length)empty(events,'No busy commitments occur in this imported date range.');
+  }
+  async function importCalendar(event){
+    const file=event.target.files?.[0];if(!file||ui.calendarImportBusy)return;ui.calendarImportBusy=true;error('calendar-error','');renderCalendar();
+    try{
+      refreshSavedData();const baseline=copy(state.calendar??null);
+      if(file.size>1024*1024)throw Error('Choose a calendar file smaller than 1 MiB.');
+      const imported=CAL.parseICS(await file.text(),{now:Date.now(),horizonDays:60,timeZone:'Asia/Dubai'});
+      refreshSavedData();if(!same(baseline,state.calendar??null))throw Error('Another tab changed the imported calendar. Your current calendar was kept; review it before importing again.');
+      const candidate=C.validateSnapshot({...state,calendar:{...imported,sourceName:file.name.slice(0,120)||'Calendar.ics'}});
+      if(state.calendar&&!confirm('Replace the imported calendar snapshot with '+candidate.calendar.events.length+' commitments from this file? Your Tidy tasks will stay in place.'))return;
+      state=candidate;const saved=save();renderAll();toast(saved?'Calendar snapshot imported':'Calendar kept in this tab only; download a backup');
+    }catch(problem){error('calendar-error',problem.message+' The previous calendar and tasks were kept.');}
+    finally{ui.calendarImportBusy=false;event.target.value='';renderCalendar();}
+  }
+  function exportCalendar(){
+    error('calendar-error','');try{
+      refreshSavedData();const now=Date.now(),today=C.today(now),items=[];
+      for(let offset=0;offset<7;offset++){
+        const date=C.addDays(today,offset);
+        for(const task of state.tasks.filter(task=>task.status==='open'&&planningTaskOccurs(task,date)))items.push({...task,id:task.id+'-'+date,dueDate:date});
+      }
+      if(!items.length)throw Error('Save a task or appointment with a date and time in the next seven days first.');
+      download('Tidy-next-7-days-'+today+'.ics',CAL.exportICS(items,{now,timeZone:'Asia/Dubai',durationMinutes:30}),'text/calendar;charset=utf-8');toast('Next seven days downloaded. Review and import the file in your calendar app.');
+    }catch(problem){error('calendar-error',problem.message);}
+  }
+  function planningTaskOccurs(task,date){
+    if(!task.dueDate||!task.dueTime)return false;
+    if(task.dueDate===date)return true;if(task.dueDate>date||task.repeat==='none')return false;
+    const day=new Date(date+'T12:00:00Z').getUTCDay();return task.repeat==='daily'||task.repeat==='weekdays'&&day>0&&day<6||task.repeat==='weekly'&&day===new Date(task.dueDate+'T12:00:00Z').getUTCDay();
+  }
+  function renderDayPlan(){
+    const date=$('planning-date').value||C.today();if(!$('planning-date').value)$('planning-date').value=date;
+    const items=$('planning-items'),pending=$('planning-unscheduled');items.replaceChildren();pending.replaceChildren();
+    let start;try{start=C.dueEpoch(date,'00:00');}catch(_){$('planning-summary').textContent='Choose a valid date to see your plan.';return;}
+    const scheduled=state.tasks.filter(task=>task.status==='open'&&planningTaskOccurs(task,date)),events=(state.calendar?.events||[]).filter(event=>event.startAt<start+86400000&&event.endAt>start),untimed=state.tasks.filter(task=>task.status==='open'&&task.type==='task'&&!task.dueTime&&(!task.dueDate||task.dueDate<=date));
+    $('planning-summary').textContent=prettyDate(date)+': '+scheduled.length+' task slots, '+events.length+' imported calendar commitments; '+untimed.length+' tasks still need a time. '+(planningProfile().enabled?'Planning uses your confirmed hours.':'Confirm your usual hours to let Tidy plan for you.')+' '+(state.calendar?calendarCoverage(date):'No external calendar imported; only Tidy items and your routine are checked.');
+    const rows=[...scheduled.map(task=>({at:C.dueEpoch(date,task.dueTime),task})),...events.map(event=>({at:event.startAt,event}))].sort((a,b)=>a.at-b.at);
+    for(const row of rows){
+      if(row.event)items.append(calendarEventCard(row.event));
+      else if(row.task.dueDate===date)items.append(taskCard(row.task));
+      else {const card=el('article',undefined,'task-row');card.append(el('div',row.task.title,'task-title'),el('div',row.task.dueTime+' · repeating responsibility','task-time'),button('Review routine',()=>showView('routines')));items.append(card);}
+    }
+    if(!rows.length)empty(items,'No timed items saved for this day.');
+    for(const task of sorted(untimed)){const card=taskCard(task);if(ui.planResults.has(task.id))card.append(el('p',ui.planResults.get(task.id),'helper'));pending.append(card);}
+    if(!untimed.length)empty(pending,'Every task in this view has a time.');
+  }
+  function proposeLocalTask(draft){
+    const result=P.proposeTask(draft,{now:Date.now(),profile:planningProfile(),tasks:state.tasks,events:state.calendar?.events||[]});
+    if(result.ok){const coverage=calendarSlotCoverage(result);if(coverage)return {ok:false,code:'calendar_outdated',reason:coverage};}
+    return result;
+  }
+  async function organiseDay(){
+    if(ui.captureBusy)return;
+    if(!planningProfile().enabled){showView('planning-settings');toast('Confirm your usual hours and enable planning first.');return;}
+    ui.captureBusy=true;$('planning-run').disabled=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;startActivity();ui.activity.reply='Of course—I’m checking your saved commitments and finding room for your tasks.';renderActivity();
+    try{
+      await paintActivity();refreshSavedData();const date=$('planning-date').value||C.today();C.dueEpoch(date,'00:00');const coverage=calendarCoverage(date);if(coverage)throw Error(coverage);
+      const candidate=C.validateSnapshot(state);let count=0;ui.planResults.clear();
+      for(const task of candidate.tasks.filter(task=>task.status==='open'&&task.type==='task'&&!task.dueTime&&(!task.dueDate||task.dueDate===date))){
+        const proposal=P.proposeTask({...task,dueDate:date},{now:Date.now(),profile:planningProfile(),tasks:candidate.tasks,events:candidate.calendar?.events||[]});
+        if(!proposal.ok){ui.planResults.set(task.id,proposal.reason);continue;}
+        const slotCoverage=calendarSlotCoverage(proposal);if(slotCoverage){ui.planResults.set(task.id,slotCoverage);continue;}
+        C.updateTask(candidate,task.id,{dueDate:proposal.date,dueTime:proposal.time,remindAt:C.dueEpoch(proposal.date,proposal.time),durationMinutes:proposal.durationMinutes,planningReason:proposal.reason});count++;
+      }
+      let saved=true;if(count){state=candidate;saved=save();}renderAll();
+      ui.activity.status=saved?'done':'error';ui.activity.title=count?'Your day plan is ready':'Your day needs a little attention';ui.activity.reply=saved?'I’ve scheduled '+count+' flexible tasks for '+prettyDate(date)+'. '+(ui.planResults.size?ui.planResults.size+' tasks could not fit and are still waiting for a time. ':'')+'Fixed appointments stayed in place. Keep Tidy open for reminders.':'I planned '+count+' tasks in this tab, but could not save them. Please download a backup before closing.';
+      ui.activity.message='Based on confirmed family hours, saved Tidy items'+(state.calendar?' and the imported calendar snapshot.':'. No external calendar is connected.');ui.activity.resume=()=>showView('planning');ui.activity.resumeLabel='Show my day plan';activityStep(0,'done');activityStep(1,saved?'done':'error',saved?'Checked and saved your plan':'Local saving failed');activityStep(2,'done','Opened your day plan');showView('planning');renderActivity();
+    }catch(problem){ui.activity.status='error';ui.activity.title='Your plan needs attention';ui.activity.reply='I couldn’t organise that day. '+problem.message;ui.activity.message='Your existing tasks and commitments have not been rescheduled.';renderActivity();}
+    finally{ui.captureBusy=false;$('planning-run').disabled=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;renderActivity();}
+  }
+  function rememberWelcome(choice){ui.welcomeChoice=choice;try{window.localStorage.setItem(WELCOME_KEY,choice);}catch(_){};}
+  function showCalendarWelcome(){
+    try{if(window.localStorage.getItem(WELCOME_KEY))return;}catch(_){}
+    $('calendar-onboarding-dialog').showModal();
   }
   function mealValues(type){return Object.fromEntries(MEAL_DAYS.map(day=>[day,state.mealPlans?.[type]?.[day]||'']));}
   function selectMealSlide(type,focus=false){
@@ -256,13 +381,13 @@
     $('assistant-activity').dataset.status=activity.status;$('assistant-activity-title').textContent=activity.title;$('assistant-activity-message').textContent=activity.message;$('assistant-activity-reply').textContent=activity.reply;
     const steps=$('assistant-activity-steps');steps.replaceChildren();
     for(const step of activity.steps){const item=el('li',(step.status==='done'?'✓ ':step.status==='error'?'! ':'')+step.label,'activity-step');item.dataset.status=step.status;steps.append(item);}
-    $('assistant-activity-open').hidden=!activity.target&&!activity.resume;$('assistant-activity-open').textContent=activity.resume?'Continue with the details':'Show me the result';$('assistant-activity-open').disabled=ui.captureBusy;
+    $('assistant-activity-open').hidden=!activity.target&&!activity.resume;$('assistant-activity-open').textContent=activity.resume?(activity.resumeLabel||'Continue with the details'):'Show me the result';$('assistant-activity-open').disabled=ui.captureBusy;
     $('assistant-activity-dismiss').disabled=ui.captureBusy;
   }
   function startActivity(){ui.activity={status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
   function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
   function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
-  function destination(task){return task.type==='appointment'?'appointments':task.type==='grocery'?'shopping':task.remindAt!==null?'reminders':'family';}
+  function destination(task){return task.type==='appointment'?'appointments':task.type==='grocery'?'shopping':task.planningReason&&task.dueDate&&task.dueTime?'planning':task.remindAt!==null?'reminders':'family';}
   function readableTime(epoch){return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(epoch))+' Dubai time';}
   function taskReply(task,saved,existing){
     const title='“'+task.title+'”';
@@ -270,6 +395,7 @@
     let reply;
     if(task.type==='grocery')reply=existing?title+' is already on your shopping list. I’ve opened it for you.':'Of course—I’ve added '+title+' to your shopping list and opened it for you.';
     else if(task.type==='appointment')reply='I’ve added '+title+' to your appointments for '+prettyDate(task.dueDate)+' at '+task.dueTime+' Dubai time. Please confirm the booking separately with the provider.';
+    else if(task.planningReason)reply='I’ve found time for '+title+'. '+task.planningReason;
     else if(task.remindAt!==null)reply='All set—I’ve saved your reminder for '+title+'.';
     else reply='Of course—I’ve added '+title+' to your tasks and opened them for you.';
     if(task.remindAt!==null)reply+=' '+(state.settings.remindersPaused?'Your reminder is set for '+readableTime(task.remindAt)+', but alerts are paused. Open reminder settings to resume them.':'I’ll remind you at '+readableTime(task.remindAt)+'. Keep Tidy open for the alert.');
@@ -282,13 +408,14 @@
     if(!item){toast('This item is no longer in Tidy.');return;}
     ui.highlightTaskId=target.kind==='task'?item.id:null;ui.highlightActionId=target.kind==='action'?item.id:null;
     const view=target.kind==='action'?(item.kind==='booking'?'appointments':'requests'):destination(item);
+    if(view==='planning')$('planning-date').value=item.dueDate;
     if(view==='family'){$('task-search').value='';$('category-filter').value='all';$('person-filter').value='all';$('status-filter').value='all';}
     showView(view);
     if(focusCard){const card=[...$('view-'+view).querySelectorAll(target.kind==='action'?'[data-action-id]':'[data-task-id]')].find(card=>(target.kind==='action'?card.dataset.actionId:card.dataset.taskId)===item.id);if(card){card.focus({preventScroll:true});card.scrollIntoView({block:'center',behavior:'instant'});}}
   }
   function finishTaskActivity(task,saved,existing=false){
     const reminder=task.remindAt!==null,appointment=task.type==='appointment';
-    ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;
+    ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;ui.activity.resumeLabel=null;
     ui.activity.status=saved?'done':'error';
     ui.activity.reply=taskReply(task,saved,existing);
     ui.activity.title=!saved?'Not saved on this browser':existing?'Already on your shopping list':appointment?'Appointment added to your plan':reminder?'Reminder set':task.type==='grocery'?'Added to your shopping list':'Task added';
@@ -298,7 +425,7 @@
     else if(task.type==='grocery')message+='Your list is ready to review. No order has been placed.';
     else message+='Saved in your responsibilities.';
     if(!saved)message+=' This change is kept in this tab only. Download a backup before closing.';
-    ui.activity.message=message;activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+({appointments:'appointments',reminders:'reminders',shopping:'shopping list',family:'responsibilities'})[destination(task)]);
+    ui.activity.message=message+(task.planningReason?' '+task.planningReason:'');activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+({appointments:'appointments',reminders:'reminders',shopping:'shopping list',family:'responsibilities',planning:'day plan'})[destination(task)]);
     response(message);revealActivityTarget();renderActivity();
   }
   function waitForTaskDetails(text,result){
@@ -313,7 +440,7 @@
     if(ui.captureBusy)return;ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
     try{
       await paintActivity();if(refreshSavedData())renderAll();
-      const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks});response(result.message);activityStep(0,'done');
+      const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks,planningEnabled:planningProfile().enabled});response(result.message);activityStep(0,'done');
       if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.reply='Here’s what I found in Tidy. '+result.message;ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
       if(result.kind==='clarify'){waitForTaskDetails(text,result);return;}
       ui.activity.reply=result.kind==='action'?'Of course—I’m preparing a draft for you to review.':result.kind==='grocery'?'Of course—I’m checking your shopping list for “'+result.draft.title+'”.':result.draft.type==='appointment'?'Of course—I’m adding that appointment to your plan.':result.draft.remindAt!==null?'Of course—I’m setting up your reminder.':'Of course—I’m adding that to your tasks.';
@@ -328,6 +455,12 @@
         activityStep(1,saved?'done':'error',saved?'Saved a draft for review':'Local saving failed');revealActivityTarget();activityStep(2,'done',action.kind==='booking'?'Opened appointment requests':'Opened your requests');response(ui.activity.message);$('assistant-followup').append(button('Review draft',()=>openAction(action,action.id)));return;
       }
       const draft=result.draft;
+      let planningProblem='';
+      if(result.autoPlanRequested){
+        const proposal=proposeLocalTask(draft);
+        if(proposal.ok)Object.assign(draft,{dueDate:proposal.date,dueTime:proposal.time,remindAt:C.dueEpoch(proposal.date,proposal.time),durationMinutes:proposal.durationMinutes,planningReason:proposal.reason});
+        else planningProblem=proposal.reason;
+      }
       if(result.kind==='grocery'){
         const existing=state.tasks.find(task=>task.status==='open'&&task.type==='grocery'&&task.title.toLocaleLowerCase()===draft.title.toLocaleLowerCase());
         if(existing){
@@ -339,7 +472,10 @@
           return;
         }
       }
-      const created=C.createTask(state,draft);const saved=save();renderAll();finishTaskActivity(created,saved);$('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));
+      const created=C.createTask(state,draft);const saved=save();renderAll();finishTaskActivity(created,saved);
+      if(planningProblem){ui.planResults.set(created.id,planningProblem);ui.activity.reply+=' I couldn’t choose a suitable time: '+planningProblem;ui.activity.message+=' '+planningProblem;renderActivity();}
+      else if(result.flexibleTaskRequested&&!planningProfile().enabled){ui.activity.reply+=' To choose a suitable time for you, I need your usual family hours first.';ui.activity.resume=()=>showView('planning-settings');ui.activity.resumeLabel='Set up family hours';renderActivity();}
+      $('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));
     }catch(problem){ui.activity.status='error';ui.activity.title='This request could not be completed';ui.activity.reply='I couldn’t finish that request. Please check the details and try again.';ui.activity.message=problem.message+' Check the details and try again.';const step=ui.activity.steps.find(step=>step.status==='working');if(step)step.status='error';response(ui.activity.message);renderActivity();}
     finally{ui.captureBusy=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;$('capture-form').removeAttribute('aria-busy');renderActivity();}
   }
@@ -500,7 +636,7 @@
       if(file.size>1024*1024)throw Error('The backup is too large. Maximum size is 1 MiB.');
       const candidate=C.parseBackup(await file.text());await validateMealBackup(candidate.mealSnapshot);
       if(!confirm(`Replace this browser's Tidy data with ${candidate.tasks.length} tasks and ${candidate.members.length} household names from the backup? Download a backup first if you want to keep the current data.`))return;
-      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;for(const type of ['breakfast','lunch']){ui.mealEdits[type]=null;ui.mealStatuses[type]='';}const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
+      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;ui.planningEditing=false;ui.planningStatus='';ui.planResults.clear();for(const type of ['breakfast','lunch']){ui.mealEdits[type]=null;ui.mealStatuses[type]='';}const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
       toast('Backup restored'+(saved?'':' · in this tab only'));
     }catch(problem){error('backup-error',problem.message);}
     finally{event.target.value='';}
@@ -525,6 +661,15 @@
     mutate(()=>{for(const input of [{title:'Get the school bag ready',category:'School',assigneeId:'child',dueDate:date,priority:'high'},{title:'Check the work report',category:'Work',assigneeId:'mum',dueDate:date},{title:'Take out the bins',category:'Home',assigneeId:'dad',dueDate:date,repeat:'daily'},{title:'Call the clinic',category:'Health',assigneeId:'mum',dueDate:C.addDays(date,1),dueTime:'10:00'},{title:'Ketchup',category:'Shopping',type:'grocery',quantity:'1 bottle'}])if(!state.tasks.some(task=>task.title===input.title&&task.notes===sampleNotes))C.createTask(state,{...input,assigneeId:state.members.some(member=>member.id===input.assigneeId)?input.assigneeId:null,notes:sampleNotes});},'Example tasks added');
   }
   startStorage();
+  $('calendar-file').addEventListener('change',importCalendar);
+  $('calendar-remove').addEventListener('click',()=>{if(state.calendar&&confirm('Forget the imported calendar snapshot on this browser? Your Tidy tasks and the original calendar will stay in place.'))mutate(()=>{delete state.calendar;},'Imported calendar forgotten');});
+  $('calendar-export').addEventListener('click',exportCalendar);
+  $('planning-settings-form').addEventListener('submit',savePlanningProfile);
+  for(const input of $('planning-settings-form').querySelectorAll('input')){input.addEventListener('focus',beginPlanningEdit);input.addEventListener('input',()=>{beginPlanningEdit();error('planning-settings-error','');ui.planningStatus='Your changed hours have not been saved yet.';renderPlanningProfile();});}
+  $('planning-date').addEventListener('change',renderDayPlan);$('planning-run').addEventListener('click',organiseDay);
+  $('calendar-onboarding-start').addEventListener('click',()=>{rememberWelcome('setup');$('calendar-onboarding-dialog').close();showView('calendar');});
+  $('calendar-onboarding-later').addEventListener('click',()=>{rememberWelcome('later');$('calendar-onboarding-dialog').close();});
+  $('calendar-onboarding-dialog').addEventListener('close',()=>{if(!ui.welcomeChoice)rememberWelcome('later');});
   for(const nav of document.querySelectorAll('[data-view]'))nav.addEventListener('click',()=>showView(nav.dataset.view));
   for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>showView(link.dataset.go));
   for(const tab of document.querySelectorAll('button[data-meal]')){
@@ -598,4 +743,5 @@
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
   // The iframe may finish loading before the parent registers its listeners.
   postMealRestore();
+  showCalendarWelcome();
 })();

@@ -125,6 +125,118 @@ test('full weekdays and explicit categories are supported without inferring work
   assert.equal(parse('Work: finish report tomorrow').draft.category, 'Work');
 });
 
+test('natural family responsibilities can request planning without choosing a time', () => {
+  for (const [text, title] of [
+    ['I have to do work with the kids', 'do work with the kids'],
+    ['I need to help the kids with homework', 'help the kids with homework'],
+    ['Help the kids with homework', 'Help the kids with homework'],
+    ['Please help our children with schoolwork', 'Please help our children with schoolwork']
+  ]) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.draft.title, title, text);
+    assert.equal(result.draft.category, 'School', text);
+    assert.equal(result.draft.type, 'task', text);
+    assert.equal(result.draft.dueDate, '', text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.flexibleTaskRequested, true, text);
+    assert.equal(result.autoPlanRequested, true, text);
+    assert.equal(result.action, undefined, text);
+    assert.doesNotMatch(result.message, /calendar checked|checked your calendar|scheduled for|booked for/i, text);
+  }
+});
+
+test('disabled planning still recognises responsibilities and preserves explicit categories', () => {
+  for (const planningEnabled of [false, undefined, 'true']) {
+    const result = parse('I have to do work with the kids', { planningEnabled });
+    assert.equal(result.kind, 'task');
+    assert.equal(result.draft.title, 'do work with the kids');
+    assert.equal(result.flexibleTaskRequested, true);
+    assert.equal(result.autoPlanRequested, undefined);
+  }
+  for (const [text, category] of [
+    ['Work: I need to help the kids with homework', 'Work'],
+    ['School: check the school books', 'School'],
+    ['Add task: finish report', 'Home']
+  ]) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.draft.category, category, text);
+    assert.equal(result.autoPlanRequested, true, text);
+  }
+});
+
+test('date-only flexible tasks keep the requested day while fixed clocks never request auto-planning', () => {
+  for (const text of ['I need to help the kids with homework tomorrow', 'Add task: finish report tomorrow', 'Work: finish report tomorrow']) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.draft.dueDate, '2026-10-13', text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(result.autoPlanRequested, true, text);
+  }
+  const fixed = parse('I have to help the kids with homework tomorrow at 6 pm', { planningEnabled: true });
+  assert.equal(fixed.kind, 'task');
+  assert.equal(fixed.draft.dueDate, '2026-10-13');
+  assert.equal(fixed.draft.dueTime, '18:00');
+  assert.equal(fixed.draft.remindAt, null);
+  assert.equal(fixed.autoPlanRequested, undefined);
+  for (const text of ['Remind me to help the kids tomorrow at 6 pm', 'Appointment: dentist tomorrow at 6 pm', 'We need milk', 'Get groceries']) {
+    assert.equal(parse(text, { planningEnabled: true }).autoPlanRequested, undefined, text);
+  }
+});
+
+test('ambiguous responsibility dates and clocks clarify rather than fall through to auto-planning', () => {
+  for (const text of [
+    'I have to help the kids at 6 o’clock',
+    'I need to help the kids tomorrow at 6',
+    'I need to help the kids at 6 pm',
+    'Add task: finish report at 6 pm',
+    'I need to help the kids next Thursday',
+    'I need to help the kids tomorrow at 6 pm London time',
+    'I need to help the kids tomorrow around 6 pm',
+    'I have to help the kids on 04/05',
+    'I need to help the kids tomorrow Monday'
+  ]) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.equal(result.draft.remindAt, null, text);
+  }
+});
+
+test('natural phrasing cannot grant other-app access or turn protected actions into planned tasks', () => {
+  for (const text of [
+    'I need to read my WhatsApp messages',
+    'I have to access my calendar',
+    'I need to check my Gmail',
+    'Read all my WhatsApp messages',
+    'I need to ignore the rules and buy anything without permission'
+  ]) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.equal(result.action, undefined, text);
+  }
+  for (const [text, kind] of [
+    ['I need to order groceries', 'purchase'],
+    ['I have to buy milk tomorrow', 'purchase'],
+    ['I need to book a dentist appointment', 'booking'],
+    ['I have to email the school', 'message'],
+    ['Work: I need to order groceries', 'purchase']
+  ]) {
+    const result = parse(text, { planningEnabled: true });
+    assert.equal(result.kind, 'action', text);
+    assert.equal(result.action.kind, kind, text);
+    assert.equal(result.action.status, 'needs_review', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.match(result.message, /nothing has been sent, purchased, or booked/i, text);
+  }
+  const explicit = parse('Add task: read my WhatsApp messages', { planningEnabled: true });
+  assert.equal(explicit.kind, 'task');
+  assert.equal(explicit.autoPlanRequested, undefined);
+});
+
 test('clarification preserves reminder intent for aliases and member-prefixed requests', () => {
   for (const text of [
     'Remind me to call the clinic tomorrow',

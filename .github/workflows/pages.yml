@@ -22,7 +22,9 @@ jobs:
           node --check web/core.js
           node --check web/assistant.js
           node --check web/app.js
-          node --test tests/core.test.cjs tests/assistant.test.cjs
+          node --check web/calendar.js
+          node --check web/planner.js
+          node --test tests/core.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs
           python3 tools/check_inline_scripts.py web/index.html web/meals.html
           python3 -m unittest discover -s tests -p 'test_inline_scripts.py'
       - name: Build reviewed website files

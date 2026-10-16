@@ -76,6 +76,12 @@ def saved(page):
     return page.evaluate("JSON.parse(localStorage.getItem('tidy.app.v1'))")
 
 
+def skip_calendar_onboarding(page):
+    dialog = page.locator("#calendar-onboarding-dialog")
+    if dialog.is_visible():
+        page.locator("#calendar-onboarding-later").click()
+
+
 def record(page, task_id, container):
     return page.locator(f"#{container} [data-task-id='{task_id}']")
 
@@ -179,6 +185,7 @@ def main():
             try:
                 tab.goto(args.url)
                 tab.wait_for_function("!!window.TidyDemo && TidyDemo.getState().mealSnapshot !== null")
+                skip_calendar_onboarding(tab)
                 evidence = check(tab)
                 assert not case_errors, case_errors
                 result = {"name": name, "result": "PASS", "evidence": evidence}
@@ -215,6 +222,7 @@ def main():
             assert re.search(r"6:00|6\s*pm|18:00", reply, re.I), reply
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
+            skip_calendar_onboarding(tab)
             assert_destination(tab, "reminders")
             assert saved(tab)["tasks"] == [task]
             assert record(tab, task["id"], "reminder-tasks").is_visible()
@@ -262,6 +270,7 @@ def main():
             assert "does not check availability" in tab.locator("#view-appointments").inner_text()
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
+            skip_calendar_onboarding(tab)
             assert_destination(tab, "appointments")
             assert record(tab, task["id"], "appointment-tasks").is_visible()
             return {"type": task["type"], "savedRecordOnly": True, "dueTime": task["dueTime"]}
@@ -343,6 +352,7 @@ def main():
             assert "milk" in reply and re.search(r"7:00|7\s*pm|19:00", reply, re.I), reply
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
+            skip_calendar_onboarding(tab)
             assert saved(tab)["tasks"] == [updated]
             return {"sameItemId": True, "reminderPersistedAfterReload": True, "duplicateItems": 0, "reply": reply}
 
@@ -476,6 +486,7 @@ def main():
             assert "Alert shown" in record(tab, task["id"], "reminder-tasks").inner_text()
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
+            skip_calendar_onboarding(tab)
             assert saved(tab)["tasks"] == [delivered]
             assert not tab.locator("#alert-banner").is_visible()
             return {"actualIntervalFired": True, "deliveryRecorded": True, "noRepeatAfterReload": True}

@@ -519,3 +519,44 @@ test('a manual plan that exceeds the whole-backup limit rejects before assigning
   assert.equal(state.tasks, retainedTasks);
   assert.equal(Core.backupJSON(state), before);
 });
+
+function planningFixture() {
+  return { enabled: true, workDays: [1, 2, 3, 4, 5], schoolDays: [1, 2, 3, 4, 5], workStart: '08:00', workEnd: '17:00', kidsHome: '15:00', dayStart: '07:00', dayEnd: '20:30', taskMinutes: 30, familyMinutes: 45, bufferMinutes: 15 };
+}
+function calendarFixture() {
+  return { sourceName: 'Family.ics', importedAt: NOW, windowStart: NOW, windowEnd: NOW + 60 * 86400000, events: [{ id: 'school-1', title: 'School meeting', startAt: NOW + 3600000, endAt: NOW + 7200000, allDay: false, sourceUid: 'meeting@family' }], warnings: ['Imported snapshot; refresh by importing again.'] };
+}
+test('optional calendar, family hours and scheduled task details survive backups without expanding legacy data', () => {
+  const legacy = Core.backupJSON(Core.defaults());
+  assert.equal(Object.hasOwn(Core.parseBackup(legacy), 'calendar'), false);
+  assert.equal(Object.hasOwn(Core.parseBackup(legacy), 'planningProfile'), false);
+  const state = Core.defaults();
+  state.planningProfile = planningFixture(); state.calendar = calendarFixture();
+  task(state, { durationMinutes: 45, planningReason: 'After school and work, avoiding the imported meeting.' });
+  assert.deepEqual(Core.parseBackup(Core.backupJSON(state)), state);
+  const before = Core.backupJSON(state);
+  for (const change of [{ durationMinutes: 0 }, { durationMinutes: 481 }, { durationMinutes: 1.5 }, { planningReason: 'x'.repeat(1001) }]) {
+    assert.throws(() => Core.updateTask(state, state.tasks[0].id, change));
+    assert.equal(Core.backupJSON(state), before);
+  }
+});
+test('invalid family hours and imported busy events reject before replacing saved responsibilities', () => {
+  const state = Core.defaults(); task(state);
+  const before = Core.backupJSON(state);
+  const profile = planningFixture(), calendar = calendarFixture();
+  for (const patch of [{ workDays: [1, 1] }, { workDays: [7] }, { schoolDays: [1, 1] }, { schoolDays: [7] }, { workStart: '18:00' }, { dayEnd: '06:00' }, { familyMinutes: -10 }, { bufferMinutes: 121 }, { enabled: 'yes' }]) {
+    assert.throws(() => Core.validateSnapshot({ ...state, planningProfile: { ...profile, ...patch } }));
+  }
+  for (const patch of [{ windowEnd: calendar.windowStart }, { events: [{ ...calendar.events[0], endAt: calendar.events[0].startAt }] }, { events: [calendar.events[0], calendar.events[0]] }, { events: [{ ...calendar.events[0], allDay: 'true' }] }, { importedAt: Infinity }]) {
+    assert.throws(() => Core.validateSnapshot({ ...state, calendar: { ...calendar, ...patch } }));
+  }
+  assert.equal(Core.backupJSON(state), before);
+});
+test('manual schedule edits clear an old automatic-planning reason while preserving task duration', () => {
+  const state = Core.defaults();
+  const item = task(state, { dueTime: '17:00', durationMinutes: 45, planningReason: 'Chosen from family hours.' });
+  Core.updateTask(state, item.id, { dueTime: '18:00' });
+  assert.equal(item.planningReason, ''); assert.equal(item.durationMinutes, 45);
+  Core.updateTask(state, item.id, { dueTime: '19:00', planningReason: 'A fresh reviewed plan.' });
+  assert.equal(item.planningReason, 'A fresh reviewed plan.');
+});
