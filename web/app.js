@@ -185,6 +185,9 @@
   function renderShopping(){
     const items=state.tasks.filter(task=>task.status==='open'&&task.type==='grocery');
     taskList('shopping-tasks',items,'Your grocery list is empty. Add an item above.');
+    const checked=state.tasks.filter(task=>task.status==='done'&&task.type==='grocery');
+    $('grocery-completed-section').hidden=!checked.length;$('grocery-completed-count').textContent=String(checked.length);
+    taskList('grocery-completed-tasks',checked,'No checked items yet.');
     const list=$('meal-shopping-items');list.replaceChildren();
     if(ui.mealVerified&&ui.groceriesApproved){
       $('meal-shopping-status').textContent='From your approved grocery draft, after checking the kitchen. No order placed.';

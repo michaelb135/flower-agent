@@ -6,7 +6,7 @@ A web app for household tasks, quick requests, assignments, routines, family pla
 
 Tidy opens on **Home**, a directory with six everyday sections: **Menu**, **Groceries**, **Tasks**, **Reminders**, **Appointments** and **Calendar**. Other tools sit under Planning, Family responsibilities and Useful tools. Each section has a Home link; section navigation also supports the browser’s Back and Forward buttons and direct links. Today remains an overview.
 
-Tasks, undated tasks and routines show task records; grocery items and appointments stay in their own lists. Groceries has its own item-and-quantity form, preserving existing reminders when matching items are updated. Matching items are not duplicated, missing quantities can be filled, and conflicting quantities wait for review. Failed saves retain the entry and item for backup and retry. Menu keeps the independent breakfast, lunch and dinner plans. Navigation preserves existing browser data and unfinished meal entries.
+Tasks, undated tasks and routines show task records; grocery items and appointments stay in their own lists. Groceries has its own item-and-quantity form, preserving existing reminders when matching items are updated. Checked grocery items remain available in their own expandable group and can be reopened. Matching items are not duplicated, missing quantities can be filled, and conflicting quantities wait for review. Failed saves retain the entry and item for backup and retry. Menu keeps the independent breakfast, lunch and dinner plans. Navigation preserves existing browser data and unfinished meal entries.
 
 ## Calendar and planning
 

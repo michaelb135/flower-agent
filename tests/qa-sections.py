@@ -369,6 +369,49 @@ def main():
 
         run("Grocery quantity updates and two-tab entry preserve identity and the latest list", missing_quantity_and_tabs)
 
+        def checked_grocery_reopen(context):
+            tab = page(context)
+            section(tab, "family")
+            tab.locator("#family-add").click()
+            tab.locator("#task-title").fill("Tidy the desk")
+            tab.locator("#save-task").click()
+            ordinary, = saved(tab)["tasks"]
+            tab.locator(f'#family-tasks [data-task-id="{ordinary["id"]}"]').get_by_role("button", name="Complete Tidy the desk", exact=True).click()
+            section(tab, "shopping")
+            assert not tab.locator("#grocery-completed-section").is_visible()
+            grocery(tab, "Bananas", "4")
+            original = next(task for task in saved(tab)["tasks"] if task["type"] == "grocery")
+            tab.locator(f'#shopping-tasks [data-task-id="{original["id"]}"]').get_by_role("button", name="Complete Bananas", exact=True).click()
+            assert tab.locator(f'#shopping-tasks [data-task-id="{original["id"]}"]').count() == 0
+            checked = tab.locator("#grocery-completed-section")
+            assert checked.is_visible()
+            assert not checked.evaluate("node=>node.open")
+            assert "1" in tab.locator("#grocery-completed-count").inner_text()
+            checked.locator("summary").click()
+            reopened_card = tab.locator(f'#grocery-completed-tasks [data-task-id="{original["id"]}"]')
+            assert reopened_card.is_visible()
+            assert tab.locator("#grocery-completed-tasks [data-task-id]").count() == 1
+            assert "Tidy the desk" not in checked.inner_text()
+            completed = next(task for task in saved(tab)["tasks"] if task["id"] == original["id"])
+            assert completed["status"] == "done" and completed["quantity"] == "4"
+            reopened_card.get_by_role("button", name="Reopen Bananas", exact=True).click()
+            assert tab.locator(f'#shopping-tasks [data-task-id="{original["id"]}"]').is_visible()
+            assert not checked.is_visible()
+            restored = next(task for task in saved(tab)["tasks"] if task["id"] == original["id"])
+            assert restored["status"] == "open" and restored["quantity"] == "4"
+            assert restored["createdAt"] == original["createdAt"]
+            assert len(saved(tab)["tasks"]) == 2
+            assert next(task for task in saved(tab)["tasks"] if task["id"] == ordinary["id"])["status"] == "done"
+            tab.reload()
+            tab.wait_for_function("!!window.TidyDemo")
+            assert tab.locator(f'#shopping-tasks [data-task-id="{original["id"]}"]').is_visible()
+            assert not tab.locator("#grocery-completed-section").is_visible()
+            return {"checkedItemAccessibleInGroceries": True, "collapsedUntilOpened": True,
+                    "ordinaryTasksExcluded": True, "reopenKeepsIdentityAndQuantity": True,
+                    "reloadPreservesReopenedItem": True}
+
+        run("Checked groceries stay accessible and can be reopened without mixing in completed tasks", checked_grocery_reopen)
+
         def separated_lists(context):
             tab = page(context)
             section(tab, "shopping")
