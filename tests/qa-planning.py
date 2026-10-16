@@ -226,8 +226,10 @@ def main():
             dialog = tab.locator("#calendar-onboarding-dialog")
             assert dialog.is_visible()
             text = dialog.inner_text()
-            assert re.search(r"cannot read.*phone|can.t read.*phone", text, re.I), text
+            assert re.search(r"(?:cannot|can.t) read.*(?:phone|device).*calendar.*directly", text, re.I), text
             assert ".ics" in text or "calendar file" in text.lower()
+            assert re.search(r"Google.*Outlook.*(?:one.time setup|setup)", text, re.I), text
+            assert re.search(r"review.*access.*provider", text, re.I), text
             tab.locator("#calendar-onboarding-later").click()
             assert not dialog.is_visible()
             assert not state(tab).get("calendar")
@@ -237,9 +239,10 @@ def main():
             assert tab.evaluate("localStorage.getItem('tidy.calendar-welcome.v1')") is not None
             section(tab, "calendar")
             assert tab.locator("#calendar-file").is_visible()
-            return {"transparentFileImportOnly": True, "skipPersists": True, "setUpLaterAvailable": True}
+            return {"accountSetupOrFileImportExplained": True, "noDirectDeviceAccessClaim": True,
+                    "providerPermissionReviewed": True, "skipPersists": True, "setUpLaterAvailable": True}
 
-        run("First opening explains calendar-file access honestly and Not now persists", introduction)
+        run("First opening explains account setup or file access honestly and Not now persists", introduction)
 
         def introduction_accept(context):
             tab = page(context)

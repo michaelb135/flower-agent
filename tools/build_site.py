@@ -21,13 +21,15 @@ if output == source or source in output.parents or output == repo or output in s
 output.mkdir(parents=True, exist_ok=True)
 if any(output.iterdir()):
     raise SystemExit('Build output must be an empty directory.')
-names = ['index.html', 'styles.css', 'app.js', 'core.js', 'assistant.js', 'calendar.js', 'planner.js', 'meals.html']
+names = ['index.html', 'styles.css', 'app.js', 'core.js', 'assistant.js', 'calendar.js', 'planner.js', 'meals.html', 'calendar-connect.js', 'calendar-auth.html', 'calendar-auth.js', 'vendor/msal-browser.min.js', 'vendor/msal-redirect-bridge.min.js', 'vendor/msal-LICENSE.txt']
 hashes = {}
 for name in names:
     original = source / name
     if not original.is_file() or original.is_symlink():
         raise SystemExit('Missing or unsafe runtime file: ' + name)
-    shutil.copy2(original, output / name)
+    target = output / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(original, target)
     hashes[name] = hashlib.sha256(original.read_bytes()).hexdigest()
 (output / '.nojekyll').write_text('')
 (output / 'build-info.json').write_text(json.dumps({'app': 'Tidy', 'revision': args.revision, 'files': hashes}, indent=2) + '\n')

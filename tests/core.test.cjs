@@ -560,3 +560,18 @@ test('manual schedule edits clear an old automatic-planning reason while preserv
   Core.updateTask(state, item.id, { dueTime: '19:00', planningReason: 'A fresh reviewed plan.' });
   assert.equal(item.planningReason, 'A fresh reviewed plan.');
 });
+
+test('account calendar provenance round-trips while tokens and unsupported connection fields never enter backups', () => {
+  for (const sourceType of ['google', 'microsoft', 'file']) {
+    const state = Core.defaults();
+    state.calendar = { ...calendarFixture(), sourceType, accessToken: 'synthetic-not-a-real-token', refreshToken: 'synthetic-refresh' };
+    const backup = Core.backupJSON(state), restored = Core.parseBackup(backup);
+    assert.equal(restored.calendar.sourceType, sourceType);
+    assert.equal(backup.includes('synthetic-not-a-real-token'), false);
+    assert.equal(backup.includes('synthetic-refresh'), false);
+    assert.deepEqual(restored.calendar.events, state.calendar.events);
+  }
+  const state = { ...Core.defaults(), calendar: { ...calendarFixture(), sourceType: 'device-permission-granted' } };
+  assert.throws(() => Core.validateSnapshot(state), /calendar source/);
+  assert.equal(Object.hasOwn(Core.parseBackup(Core.backupJSON(Core.defaults())), 'calendar'), false);
+});

@@ -252,6 +252,7 @@
       warnings: list(value.warnings === undefined ? [] : value.warnings, 20, 'Calendar notes').map(note => string(note, '', 1000, 'Calendar note', true))
     };
     if (result.windowEnd <= result.windowStart || result.windowEnd - result.windowStart > 366 * DAY_MS) fail('Invalid imported calendar date range.');
+    if (value.sourceType !== undefined) result.sourceType = choice(value.sourceType, undefined, ['file', 'google', 'microsoft'], 'calendar source');
     unique(result.events, 'calendar event');
     return result;
   }

@@ -1,14 +1,18 @@
 /* UI for Tidy's web app. Provider actions remain manual drafts. */
 (function () {
   'use strict';
-  const C=window.TidyCore, A=window.TidyAssistant, P=window.TidyPlanner, CAL=window.TidyCalendar, KEY='tidy.app.v1', WELCOME_KEY='tidy.calendar-welcome.v1';
+  const C=window.TidyCore, A=window.TidyAssistant, P=window.TidyPlanner, CAL=window.TidyCalendar, CC=window.TidyCalendarConnect, KEY='tidy.app.v1', WELCOME_KEY='tidy.calendar-welcome.v1', CONNECTION_KEY='tidy.calendar-connection-config.v1';
   const GROCERY_STORES=Object.freeze({Carrefour:{name:'Carrefour UAE',url:'https://www.carrefouruae.com/'},Waitrose:{name:'Waitrose UAE',url:'https://www.waitrose.ae/'},Kibsons:{name:'Kibsons',url:'https://www.kibsons.com/'}});
+  // Public registration IDs can be deployed here once the provider setup is
+  // complete. They are application identifiers, never client secrets.
+  const DEFAULT_CONNECTION_CONFIG=Object.freeze({googleClientId:'',microsoftClientId:''});
   const $=id=>document.getElementById(id);
   const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
   Object.assign(ui,{planningEditing:false,planningBaseline:null,planningStatus:'',planResults:new Map(),calendarImportBusy:false,welcomeChoice:null});
+  Object.assign(ui,{connectionConfig:{...DEFAULT_CONNECTION_CONFIG},connectionConfigBaseline:null,connectionConfigEditing:false,connectionConfigStatus:'',connector:null,accountProvider:null,accountBusy:false,accountMessage:''});
   const PROFILE_FIELDS=['enabled','workDays','schoolDays','workStart','workEnd','kidsHome','dayStart','dayEnd','taskMinutes','familyMinutes','bufferMinutes'];
   const PROFILE_INPUTS={workStart:'work-start',workEnd:'work-end',kidsHome:'kids-home',dayStart:'day-start',dayEnd:'day-end',taskMinutes:'task-minutes',familyMinutes:'family-minutes',bufferMinutes:'buffer-minutes'};
   function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
@@ -253,27 +257,83 @@
   }
   function calendarCoverage(date){
     if(!state.calendar)return '';
-    return date<C.today(state.calendar.windowStart)||date>C.today(state.calendar.windowEnd-1)?'The imported calendar does not cover this day. Import a fresh file before I choose a time.':'';
+    return date<C.today(state.calendar.windowStart)||date>C.today(state.calendar.windowEnd-1)?'The saved calendar does not cover this day. Refresh your account or import a fresh file before I choose a time.':'';
   }
   function calendarSlotCoverage(proposal){
     if(!state.calendar)return '';const start=C.dueEpoch(proposal.date,proposal.time),end=start+proposal.durationMinutes*60000;
-    return start<state.calendar.windowStart||end>state.calendar.windowEnd?'The imported calendar does not cover this time. Import a fresh file before I choose a time.':'';
+    return start<state.calendar.windowStart||end>state.calendar.windowEnd?'The saved calendar does not cover this time. Refresh your account or import a fresh file before I choose a time.':'';
   }
   function calendarEventCard(event){
     const row=el('article',undefined,'task-row');row.dataset.calendarId=event.id;row.append(el('div',event.title,'task-title'));
     row.append(el('div',event.allDay?'All day · '+prettyDate(C.today(event.startAt)):readableTime(event.startAt)+' to '+new Intl.DateTimeFormat('en-GB',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Dubai'}).format(new Date(event.endAt)),'task-time'));
-    row.append(el('p','Imported calendar commitment · fixed time','helper'));return row;
+    row.append(el('p','Saved calendar commitment · fixed time','helper'));return row;
+  }
+  function calendarRedirectUri(){return new URL('calendar-auth.html',location.href).href;}
+  function newConnector(config){return CC.createConnector({...config,redirectUri:calendarRedirectUri()});}
+  function startCalendarConnections(){
+    try{
+      ui.connectionConfigBaseline=window.localStorage.getItem(CONNECTION_KEY);
+      if(ui.connectionConfigBaseline!==null){const parsed=JSON.parse(ui.connectionConfigBaseline);if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Saved connection settings could not be read.');ui.connectionConfig={googleClientId:parsed.googleClientId||'',microsoftClientId:parsed.microsoftClientId||''};}
+      ui.connector=newConnector(ui.connectionConfig);
+    }catch(_){ui.connectionConfig={...DEFAULT_CONNECTION_CONFIG};ui.connector=newConnector(ui.connectionConfig);ui.connectionConfigStatus='Saved connection settings need attention. Your calendar events and tasks have not changed.';}
+  }
+  function beginConnectionConfigEdit(){ui.connectionConfigEditing=true;}
+  function renderCalendarConnection(){
+    if(!ui.connectionConfigEditing){$('calendar-google-client-id').value=ui.connectionConfig.googleClientId;$('calendar-microsoft-client-id').value=ui.connectionConfig.microsoftClientId;}
+    $('calendar-config-origin').value=location.origin;$('calendar-config-redirect').value=calendarRedirectUri();$('calendar-config-status').textContent=ui.connectionConfigStatus;
+    for(const id of ['calendar-connect-google','calendar-connect-microsoft','calendar-connection-config-save'])$(id).disabled=ui.accountBusy||ui.calendarImportBusy;
+    const session=ui.accountProvider?ui.connector.status(ui.accountProvider):null;
+    $('calendar-account-refresh').disabled=ui.accountBusy||ui.calendarImportBusy||!session?.connected;
+    $('calendar-account-disconnect').disabled=ui.accountBusy||!ui.accountProvider;
+    if(ui.accountBusy)$('calendar-connection-status').textContent=ui.accountMessage||'Waiting for your calendar provider. No new events have been saved yet.';
+    else if(ui.accountMessage)$('calendar-connection-status').textContent=ui.accountMessage;
+    else if(ui.accountProvider&&session?.connected)$('calendar-connection-status').textContent='Account authorized in this tab. Refresh events when your calendar changes. Planning uses the last saved snapshot.';
+    else if(state.calendar?.sourceType==='google'||state.calendar?.sourceType==='microsoft')$('calendar-connection-status').textContent='Saved '+(state.calendar.sourceType==='google'?'Google':'Outlook')+' events are available. Connect that account again to refresh them; this is not an active sign-in after reloading.';
+    else $('calendar-connection-status').textContent=ui.connectionConfig.googleClientId||ui.connectionConfig.microsoftClientId?'Choose Google Calendar or Outlook to request read-only access. No account is connected yet.':'No calendar account connected. One-time connection setup is required.';
+  }
+  async function disconnectCalendarAccount(){
+    const provider=ui.accountProvider;ui.accountProvider=null;ui.accountMessage='Disconnected from this tab. Saved events remain available; use Forget saved calendar to remove them.';renderCalendarConnection();
+    if(provider)try{await ui.connector.disconnect(provider);}catch(_){error('calendar-connection-error','The local session was cleared. Check your provider’s account settings if you also want to revoke Tidy’s permission.');}
+  }
+  async function saveConnectionConfig(event){
+    event.preventDefault();if(ui.accountBusy)return;error('calendar-config-error','');
+    try{
+      const config={googleClientId:$('calendar-google-client-id').value.trim(),microsoftClientId:$('calendar-microsoft-client-id').value.trim()},connector=newConnector(config);
+      const raw=window.localStorage.getItem(CONNECTION_KEY);if(raw!==ui.connectionConfigBaseline)throw Error('Connection settings changed in another tab. Reload before replacing them; your entered IDs are still here.');
+      const encoded=JSON.stringify(config);window.localStorage.setItem(CONNECTION_KEY,encoded);
+      const old=ui.connector;ui.connector=connector;ui.connectionConfig=config;ui.connectionConfigBaseline=encoded;ui.connectionConfigEditing=false;ui.connectionConfigStatus='Public connection settings saved on this browser. Provider registration must match the addresses shown above.';ui.accountProvider=null;ui.accountMessage='';renderCalendarConnection();
+      for(const provider of ['google','microsoft'])try{await old.disconnect(provider);}catch(_){}
+    }catch(problem){error('calendar-config-error',problem.message||'The connection settings could not be saved.');}
+  }
+  async function connectCalendarAccount(provider,refresh=false){
+    if(ui.accountBusy||ui.calendarImportBusy)return;
+    error('calendar-connection-error','');
+    const configured=provider==='google'?ui.connectionConfig.googleClientId:ui.connectionConfig.microsoftClientId;
+    if(!configured){$('calendar-connection-setup').open=true;ui.accountMessage='Connection setup is required before '+(provider==='google'?'Google':'Microsoft')+' can ask for permission. No account has been accessed.';error('calendar-connection-error','Register Tidy with this provider and save its public application ID in Connection setup.');renderCalendarConnection();$('calendar-connection-setup').scrollIntoView({block:'start',behavior:'instant'});return;}
+    refreshSavedData();const baseline=copy(state.calendar??null),connector=ui.connector;ui.accountBusy=true;ui.accountMessage=refresh?'Refreshing events from your calendar account…':'Opening your calendar provider’s read-only permission request…';renderCalendar();
+    try{
+      const snapshot=await (refresh?connector.refresh(provider):connector.connect(provider));
+      if(ui.connector!==connector)throw Error('Connection settings changed while signing in. Try again with the current settings.');
+      refreshSavedData();if(!same(baseline,state.calendar??null))throw Error('Another tab changed your saved calendar. Its events were kept; review them before connecting again.');
+      const candidate=C.validateSnapshot({...state,calendar:snapshot});
+      if(state.calendar&&state.calendar.sourceType!==provider&&!confirm('Use '+snapshot.sourceName+' for planning instead of the currently saved calendar? Tidy uses one account source or file snapshot at a time. Your tasks will stay in place.')){await connector.disconnect(provider);ui.accountMessage='Your previous calendar snapshot was kept.';return;}
+      const previousProvider=ui.accountProvider;state=candidate;const saved=save();ui.accountProvider=provider;
+      ui.accountMessage=(saved?'Calendar events read and saved on this browser.':'Events were read but could not be saved; they remain in this tab only. Download a backup before closing.')+' Planning now uses '+snapshot.sourceName+'. Refresh when your calendar changes.';
+      if(previousProvider&&previousProvider!==provider)try{await connector.disconnect(previousProvider);}catch(_){error('calendar-connection-error','The new events were saved. Clear the previous provider permission in its account settings if needed.');}
+      renderAll();
+    }catch(problem){ui.accountMessage='The account update did not complete. Your previously saved calendar events and tasks were kept.';error('calendar-connection-error',problem.message||'Calendar access could not be completed.');}
+    finally{ui.accountBusy=false;renderCalendar();}
   }
   function renderCalendar(){
-    const calendar=state.calendar,events=$('calendar-events');events.replaceChildren();$('calendar-remove').disabled=!calendar;$('calendar-file').disabled=ui.calendarImportBusy;
-    if(!calendar){$('calendar-status').textContent='No calendar file imported. Tidy cannot see your phone’s calendar.';$('calendar-window').textContent='Import a file to include its commitments in planning.';empty(events,'Your imported events will appear here.');return;}
-    $('calendar-status').textContent=calendar.events.length+' imported commitments from '+calendar.sourceName+'. '+(ui.saveFailed||ui.storageLocked?'Kept in this tab only; download a backup before closing.':'Saved snapshot on this browser. This is not live sync.');
+    renderCalendarConnection();const calendar=state.calendar,events=$('calendar-events');events.replaceChildren();$('calendar-remove').disabled=!calendar||ui.accountBusy;$('calendar-file').disabled=ui.calendarImportBusy||ui.accountBusy;
+    if(!calendar){$('calendar-status').textContent='No calendar snapshot saved. Tidy cannot see your phone’s calendar directly.';$('calendar-window').textContent='Connect an account or import a file to include its commitments in planning.';empty(events,'Your saved calendar events will appear here.');return;}
+    $('calendar-status').textContent=calendar.events.length+' saved commitments from '+calendar.sourceName+'. '+(ui.saveFailed||ui.storageLocked?'Kept in this tab only; download a backup before closing.':'Saved snapshot on this browser. Refresh the account or re-import the file when events change.');
     $('calendar-window').textContent='Snapshot covers '+readableTime(calendar.windowStart)+' to '+readableTime(calendar.windowEnd)+'. Last imported '+readableTime(calendar.importedAt)+'. '+calendar.warnings.join(' ');
     for(const event of calendar.events.slice().sort((a,b)=>a.startAt-b.startAt))events.append(calendarEventCard(event));
     if(!calendar.events.length)empty(events,'No busy commitments occur in this imported date range.');
   }
   async function importCalendar(event){
-    const file=event.target.files?.[0];if(!file||ui.calendarImportBusy)return;ui.calendarImportBusy=true;error('calendar-error','');renderCalendar();
+    const file=event.target.files?.[0];if(!file||ui.calendarImportBusy||ui.accountBusy)return;ui.calendarImportBusy=true;error('calendar-error','');renderCalendar();
     try{
       refreshSavedData();const baseline=copy(state.calendar??null);
       if(file.size>1024*1024)throw Error('Choose a calendar file smaller than 1 MiB.');
@@ -281,7 +341,7 @@
       refreshSavedData();if(!same(baseline,state.calendar??null))throw Error('Another tab changed the imported calendar. Your current calendar was kept; review it before importing again.');
       const candidate=C.validateSnapshot({...state,calendar:{...imported,sourceName:file.name.slice(0,120)||'Calendar.ics'}});
       if(state.calendar&&!confirm('Replace the imported calendar snapshot with '+candidate.calendar.events.length+' commitments from this file? Your Tidy tasks will stay in place.'))return;
-      state=candidate;const saved=save();renderAll();toast(saved?'Calendar snapshot imported':'Calendar kept in this tab only; download a backup');
+      state=candidate;const saved=save();if(ui.accountProvider)await disconnectCalendarAccount();ui.accountMessage='';renderAll();toast(saved?'Calendar snapshot imported':'Calendar kept in this tab only; download a backup');
     }catch(problem){error('calendar-error',problem.message+' The previous calendar and tasks were kept.');}
     finally{ui.calendarImportBusy=false;event.target.value='';renderCalendar();}
   }
@@ -661,8 +721,15 @@
     mutate(()=>{for(const input of [{title:'Get the school bag ready',category:'School',assigneeId:'child',dueDate:date,priority:'high'},{title:'Check the work report',category:'Work',assigneeId:'mum',dueDate:date},{title:'Take out the bins',category:'Home',assigneeId:'dad',dueDate:date,repeat:'daily'},{title:'Call the clinic',category:'Health',assigneeId:'mum',dueDate:C.addDays(date,1),dueTime:'10:00'},{title:'Ketchup',category:'Shopping',type:'grocery',quantity:'1 bottle'}])if(!state.tasks.some(task=>task.title===input.title&&task.notes===sampleNotes))C.createTask(state,{...input,assigneeId:state.members.some(member=>member.id===input.assigneeId)?input.assigneeId:null,notes:sampleNotes});},'Example tasks added');
   }
   startStorage();
+  startCalendarConnections();
+  $('calendar-connect-google').addEventListener('click',()=>connectCalendarAccount('google'));
+  $('calendar-connect-microsoft').addEventListener('click',()=>connectCalendarAccount('microsoft'));
+  $('calendar-account-refresh').addEventListener('click',()=>{if(ui.accountProvider)connectCalendarAccount(ui.accountProvider,true);});
+  $('calendar-account-disconnect').addEventListener('click',disconnectCalendarAccount);
+  $('calendar-connection-config-form').addEventListener('submit',saveConnectionConfig);
+  for(const input of [$('calendar-google-client-id'),$('calendar-microsoft-client-id')]){input.addEventListener('focus',beginConnectionConfigEdit);input.addEventListener('input',()=>{beginConnectionConfigEdit();ui.connectionConfigStatus='Your connection settings have not been saved yet.';error('calendar-config-error','');renderCalendarConnection();});}
   $('calendar-file').addEventListener('change',importCalendar);
-  $('calendar-remove').addEventListener('click',()=>{if(state.calendar&&confirm('Forget the imported calendar snapshot on this browser? Your Tidy tasks and the original calendar will stay in place.'))mutate(()=>{delete state.calendar;},'Imported calendar forgotten');});
+  $('calendar-remove').addEventListener('click',()=>{if(state.calendar&&confirm('Forget the saved calendar snapshot on this browser? Your Tidy tasks and the original calendar will stay in place.'))mutate(()=>{delete state.calendar;},'Saved calendar forgotten');});
   $('calendar-export').addEventListener('click',exportCalendar);
   $('planning-settings-form').addEventListener('submit',savePlanningProfile);
   for(const input of $('planning-settings-form').querySelectorAll('input')){input.addEventListener('focus',beginPlanningEdit);input.addEventListener('input',()=>{beginPlanningEdit();error('planning-settings-error','');ui.planningStatus='Your changed hours have not been saved yet.';renderPlanningProfile();});}

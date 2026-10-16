@@ -24,8 +24,12 @@ jobs:
           node --check web/app.js
           node --check web/calendar.js
           node --check web/planner.js
-          node --test tests/core.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs
-          python3 tools/check_inline_scripts.py web/index.html web/meals.html
+          node --check web/calendar-connect.js
+          node --check web/calendar-auth.js
+          node --check web/vendor/msal-browser.min.js
+          node --check web/vendor/msal-redirect-bridge.min.js
+          node --test tests/core.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs tests/calendar-connect.test.cjs
+          python3 tools/check_inline_scripts.py web/index.html web/meals.html web/calendar-auth.html
           python3 -m unittest discover -s tests -p 'test_inline_scripts.py'
       - name: Build reviewed website files
         run: python3 tools/build_site.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/tidy-site"
