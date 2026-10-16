@@ -103,8 +103,16 @@ def import_busy_calendar(tab):
 
 
 def edit_task(tab, task_id, title=None, notes=None):
-    tab.locator('[data-view="family"]').click()
-    tab.locator(f'#family-tasks [data-task-id="{task_id}"]').get_by_role("button", name="Edit", exact=True).click()
+    task = next(item for item in state(tab)["tasks"] if item["id"] == task_id)
+    destination, container = {
+        "grocery": ("shopping", "shopping-tasks"),
+        "appointment": ("appointments", "appointment-tasks"),
+    }.get(task["type"], ("family", "family-tasks"))
+    if destination == "family":
+        tab.locator('[data-view="family"]').click()
+    else:
+        section(tab, destination)
+    tab.locator(f'#{container} [data-task-id="{task_id}"]').get_by_role("button", name="Edit", exact=True).click()
     if title is not None:
         tab.locator("#task-title").fill(title)
     if notes is not None:

@@ -22,11 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".qa-results" / "sections"
 KEY = "tidy.app.v1"
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-HUB_PAGES = ["meals", "shopping", "stores", "appointments", "routines",
+HUB_PAGES = ["meals", "shopping", "family", "reminders", "stores", "appointments", "routines",
              "household", "requests", "health", "inbox", "upcoming",
              "calendar", "planning", "planning-settings"]
 PRIMARY_CONTROLS = {
-    "meals": "#meal-tab-breakfast", "shopping": "#shopping-card",
+    "meals": "#meal-tab-breakfast", "shopping": "#grocery-form",
+    "family": "#family-add", "reminders": "#reminders-add",
     "stores": "#provider-list", "appointments": "#appointments-add",
     "routines": "#add-routine", "household": "#add-member",
     "requests": "#new-action", "health": "#health-square-form",
@@ -101,6 +102,18 @@ def import_backup(tab, data):
     tab.locator("#import-backup").set_input_files({"name": "synthetic-tidy-backup.json", "mimeType": "application/json", "buffer": json.dumps(data).encode()})
 
 
+def grocery(tab, title, quantity=""):
+    tab.locator("#grocery-title").fill(title)
+    tab.locator("#grocery-quantity").fill(quantity)
+    tab.locator("#grocery-add").click()
+
+
+def full_task_editor(tab):
+    if tab.locator("#assistant-clarify-dialog").is_visible():
+        tab.locator("#assistant-clarify-details").click()
+    tab.locator("#task-dialog").wait_for(state="visible")
+
+
 def assert_no_overflow(tab, selector):
     bounds = tab.locator(selector).evaluate("""node => ({
       client:node.clientWidth, scroll:node.scrollWidth,
@@ -115,11 +128,12 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:9045/")
     parser.add_argument("--browser", default="/usr/bin/chromium")
     parser.add_argument("--case", action="append", default=[])
+    parser.add_argument("--output", type=Path, default=OUT)
     args = parser.parse_args()
     selected = origin(args.url)
     if selected[0] not in {"http", "https"} or not selected[1]:
         parser.error("--url must identify an HTTP(S) deployment")
-    OUT.mkdir(parents=True, exist_ok=True)
+    args.output.mkdir(parents=True, exist_ok=True)
     results, errors, external = [], [], []
     source_hashes = {name: hashlib.sha256((ROOT / "web" / name).read_bytes()).hexdigest()
                      for name in ["index.html", "styles.css", "core.js", "app.js", "meals.html"]}
@@ -162,7 +176,7 @@ def main():
                 result = {"name": name, "result": "FAIL", "detail": str(problem), "traceback": traceback.format_exc()}
                 for index, tab in enumerate(context.pages):
                     try:
-                        tab.screenshot(path=str(OUT / ("failure-" + re.sub(r"[^a-z0-9]+", "-", name.lower()) + f"-{index}.png")), full_page=True)
+                        tab.screenshot(path=str(args.output / ("failure-" + re.sub(r"[^a-z0-9]+", "-", name.lower()) + f"-{index}.png")), full_page=True)
                     except Exception:
                         pass
             finally:
@@ -172,8 +186,10 @@ def main():
 
         def focused_navigation(context):
             tab = page(context)
+            destination(tab, "tools")
             assert tab.locator(".app-nav [data-view]").count() == 5
-            for view in ["today", "assistant", "family", "reminders", "tools"]:
+            assert tab.locator(".app-nav [data-view]").evaluate_all("nodes=>nodes.map(node=>node.dataset.view)") == ["tools", "today", "assistant", "family", "reminders"]
+            for view in ["tools", "today", "assistant", "family", "reminders"]:
                 tab.locator(f'[data-view="{view}"]').click()
                 destination(tab, view)
                 assert tab.locator('.app-nav [aria-current="page"]').get_attribute("data-view") == view
@@ -186,7 +202,8 @@ def main():
                 for other, selector in PRIMARY_CONTROLS.items():
                     if other != name:
                         assert not tab.locator(selector).is_visible(), (name, selector)
-                assert tab.locator('.app-nav [aria-current="page"]').get_attribute("data-view") == "tools"
+                parent = name if name in {"family", "reminders"} else "tools"
+                assert tab.locator('.app-nav [aria-current="page"]').get_attribute("data-view") == parent
                 tab.reload()
                 tab.wait_for_function("!!window.TidyDemo")
                 destination(tab, name)
@@ -200,6 +217,7 @@ def main():
             tab = page(context)
             tab.locator('[data-view="reminders"]').click()
             tab.locator("#reminders-add").click()
+            full_task_editor(tab)
             tab.locator("#task-title").fill("Take a family break")
             tab.locator("#task-date").fill("2026-10-16")
             tab.locator("#task-time").fill("18:00")
@@ -209,6 +227,7 @@ def main():
             destination(tab, "reminders")
             section(tab, "appointments")
             tab.locator("#appointments-add").click()
+            full_task_editor(tab)
             tab.locator("#task-title").fill("Dentist checkup")
             tab.locator("#task-date").fill("2026-10-17")
             tab.locator("#task-time").fill("10:00")
@@ -255,6 +274,239 @@ def main():
             return {"requestShowsSavedShoppingItem": True, "storesSeparate": names}
 
         run("Ask Tidy opens the shopping list for groceries and shopping websites remain a separate function", ask_grocery)
+
+        def home_directory(context):
+            tab = page(context)
+            before = state(tab)
+            destination(tab, "tools")
+            assert tab.locator("#tools-title").inner_text() == "Home"
+            groups = tab.locator("#view-tools .section-group")
+            assert groups.count() == 4
+            assert groups.first.locator("[data-go]").evaluate_all("nodes=>nodes.map(node=>node.dataset.go)") == ["meals", "shopping", "family", "reminders", "appointments", "calendar"]
+            assert tab.locator("#view-tools [data-go=meals] strong").inner_text() == "Menu"
+            assert tab.locator("#view-tools [data-go=shopping] strong").inner_text() == "Groceries"
+            for name, heading in [("meals", "Menu"), ("shopping", "Groceries")]:
+                section(tab, name)
+                assert tab.locator(f"#view-{name} h1").inner_text() == heading
+                tab.locator(".brand").click()
+                destination(tab, "tools")
+            tab.locator('[data-view="today"]').click()
+            assert tab.locator(".today-shortcuts button").count() == 2
+            assert tab.locator("#today-meals").count() == 0
+            assert tab.locator("#today-reminders").count() == 0
+            assert tab.locator("#today-appointments").count() == 0
+            assert state(tab) == before
+            return {"homeFirst": True, "groupedDestinations": 15, "primarySections": 6,
+                    "menuAndGroceriesDistinct": True, "navigationDoesNotModifyData": True,
+                    "todayShortcuts": 2}
+
+        run("Home groups every section and keeps Today focused without changing saved data", home_directory)
+
+        def direct_groceries(context):
+            tab = page(context)
+            section(tab, "shopping")
+            assert tab.locator("#grocery-title").get_attribute("maxlength") == "300"
+            assert tab.locator("#grocery-quantity").get_attribute("maxlength") == "120"
+            before = state(tab)
+            grocery(tab, "   ")
+            assert state(tab) == before
+            assert tab.locator("#grocery-error").is_visible()
+            grocery(tab, "Milk", "2 bottles")
+            task, = saved(tab)["tasks"]
+            assert task["type"] == "grocery" and task["category"] == "Shopping"
+            assert task["title"] == "Milk" and task["quantity"] == "2 bottles"
+            assert re.search(r"added|saved", tab.locator("#grocery-status").inner_text().lower())
+            assert tab.locator("#grocery-title").input_value() == ""
+            assert tab.locator("#grocery-quantity").input_value() == ""
+            assert tab.locator("#grocery-title").evaluate("node=>node===document.activeElement")
+            grocery(tab, "mILk", "2 bottles")
+            assert len(saved(tab)["tasks"]) == 1
+            assert saved(tab)["tasks"][0]["id"] == task["id"]
+            grocery(tab, "MILK", "3 bottles")
+            assert tab.locator("#grocery-error").is_visible()
+            assert tab.locator("#grocery-title").input_value() == "MILK"
+            assert tab.locator("#grocery-quantity").input_value() == "3 bottles"
+            assert saved(tab)["tasks"] == [task]
+            grocery(tab, "<img src=x onerror=alert(1)>", "1")
+            assert len(saved(tab)["tasks"]) == 2
+            assert tab.locator("#shopping-tasks img").count() == 0
+            assert "<img src=x onerror=alert(1)>" in tab.locator("#shopping-tasks").inner_text()
+            tab.reload()
+            tab.wait_for_function("!!window.TidyDemo")
+            destination(tab, "shopping")
+            assert len(saved(tab)["tasks"]) == 2
+            assert saved(tab)["actions"] == []
+            return {"directListEntry": True, "caseInsensitiveDuplicate": True,
+                    "conflictingQuantityNeedsReview": True, "typedMarkupInert": True,
+                    "reloadAndNoProviderAction": True}
+
+        run("Groceries adds directly, avoids duplicates and preserves quantities that need review", direct_groceries)
+
+        def missing_quantity_and_tabs(context):
+            a = page(context)
+            section(a, "shopping")
+            grocery(a, "Apples")
+            original, = saved(a)["tasks"]
+            b = page(context, "#shopping")
+            grocery(b, "APPLES", "6")
+            updated, = saved(b)["tasks"]
+            assert updated["id"] == original["id"] and updated["quantity"] == "6"
+            a.wait_for_function("TidyDemo.getState().tasks[0].quantity==='6'")
+            a.locator("#grocery-title").fill("Eggs")
+            a.locator("#grocery-quantity").fill("12")
+            grocery(b, "Eggs", "12")
+            a.wait_for_function("TidyDemo.getState().tasks.length===2")
+            assert a.locator("#grocery-title").input_value() == "Eggs"
+            assert a.locator("#grocery-quantity").input_value() == "12"
+            a.locator("#grocery-add").click()
+            assert len(saved(a)["tasks"]) == 2
+            assert len({task["id"] for task in saved(a)["tasks"]}) == 2
+            grocery(a, "Apples", "7")
+            assert a.locator("#grocery-error").is_visible()
+            assert next(task for task in saved(a)["tasks"] if task["id"] == original["id"])["quantity"] == "6"
+            return {"missingQuantityUpdatedOnSameRecord": True, "typedEntrySurvivesRemoteUpdate": True,
+                    "duplicateAddedInOtherTabNotRepeated": True, "latestQuantityKept": True}
+
+        run("Grocery quantity updates and two-tab entry preserve identity and the latest list", missing_quantity_and_tabs)
+
+        def separated_lists(context):
+            tab = page(context)
+            section(tab, "shopping")
+            grocery(tab, "Milk", "1 bottle")
+            milk, = saved(tab)["tasks"]
+            tab.locator(f'#shopping-tasks [data-task-id="{milk["id"]}"]').get_by_role("button", name="Edit", exact=True).click()
+            tab.locator("#task-date").fill("2026-10-15")
+            tab.locator("#save-task").click()
+            section(tab, "family")
+            tab.locator("#family-add").click()
+            tab.locator("#task-title").fill("Check homework")
+            tab.locator("#task-date").fill("2026-10-15")
+            tab.locator("#task-time").fill("18:00")
+            tab.locator("#task-reminder").check()
+            tab.locator("#save-task").click()
+            section(tab, "appointments")
+            tab.locator("#appointments-add").click()
+            full_task_editor(tab)
+            tab.locator("#task-title").fill("Dentist")
+            tab.locator("#task-date").fill("2026-10-15")
+            tab.locator("#task-time").fill("19:00")
+            tab.locator("#save-task").click()
+            tasks = saved(tab)["tasks"]
+            homework = next(task for task in tasks if task["title"] == "Check homework")
+            dentist = next(task for task in tasks if task["title"] == "Dentist")
+            section(tab, "family")
+            assert tab.locator("#family-tasks [data-task-id]").evaluate_all("nodes=>nodes.map(node=>node.dataset.taskId)") == [homework["id"]]
+            tab.locator("#task-search").fill("Milk")
+            assert tab.locator("#family-tasks [data-task-id]").count() == 0
+            tab.locator("#task-search").fill("")
+            section(tab, "shopping")
+            assert tab.locator("#shopping-tasks [data-task-id]").evaluate_all("nodes=>nodes.map(node=>node.dataset.taskId)") == [milk["id"]]
+            section(tab, "appointments")
+            assert tab.locator("#appointment-tasks [data-task-id]").evaluate_all("nodes=>nodes.map(node=>node.dataset.taskId)") == [dentist["id"]]
+            section(tab, "reminders")
+            assert tab.locator(f'#reminder-tasks [data-task-id="{homework["id"]}"]').is_visible()
+            tab.locator('[data-view="today"]').click()
+            assert sorted(tab.locator("#today-tasks [data-task-id]").evaluate_all("nodes=>nodes.map(node=>node.dataset.taskId)")) == sorted(task["id"] for task in tasks)
+            assert len(saved(tab)["tasks"]) == 3
+            return {"tasksExcludeGroceriesAndAppointments": True, "eachListHasItsOwnType": True,
+                    "remindersReferenceSameTask": True, "todayShowsDatedOverview": True}
+
+        run("Tasks, groceries and appointments stay separate while Today gives one dated overview", separated_lists)
+
+        def navigation_history(context):
+            tab = page(context)
+            before = state(tab)
+            section(tab, "meals")
+            tab.locator('[data-meal="lunch"]').click()
+            lunch_url = tab.url
+            tab.locator('#view-meals [data-go="shopping"]').click()
+            destination(tab, "shopping")
+            tab.locator('#view-shopping [data-go="stores"]').click()
+            destination(tab, "stores")
+            tab.go_back()
+            destination(tab, "shopping")
+            tab.go_back()
+            destination(tab, "meals")
+            assert tab.url == lunch_url
+            assert tab.locator("#meal-slide-lunch").is_visible()
+            tab.go_forward()
+            destination(tab, "shopping")
+            tab.reload()
+            tab.wait_for_function("!!window.TidyDemo")
+            destination(tab, "shopping")
+            tab.evaluate("location.hash='appointments'")
+            tab.wait_for_function("!document.getElementById('view-appointments').hidden")
+            destination(tab, "appointments")
+            tab.evaluate("location.hash='unrecognised-section'")
+            tab.wait_for_function("!document.getElementById('view-tools').hidden")
+            destination(tab, "tools")
+            assert state(tab) == before
+            return {"browserBackAndForward": True, "mealSlideRestored": True,
+                    "reloadAndHashChange": True, "unknownSectionReturnsHome": True,
+                    "savedDataUnchanged": True}
+
+        run("Browser navigation and deep links restore the correct section without editing saved data", navigation_history)
+
+        def phone_organisation(context):
+            tab = page(context)
+            destination(tab, "tools")
+            assert_no_overflow(tab, "#view-tools")
+            menu_button = tab.locator('#view-tools [data-go="meals"]')
+            menu_button.focus()
+            tab.keyboard.press("Enter")
+            destination(tab, "meals")
+            tab.locator("#breakfast-monday").fill("Toast and eggs")
+            tab.locator('#view-meals [data-go="shopping"]').click()
+            destination(tab, "shopping")
+            assert_no_overflow(tab, "#view-shopping")
+            tab.locator("#grocery-title").fill("Bread")
+            tab.locator("#grocery-quantity").fill("1 loaf")
+            tab.locator("#grocery-add").focus()
+            tab.keyboard.press("Enter")
+            assert saved(tab)["tasks"][0]["title"] == "Bread"
+            assert tab.locator("#grocery-title").evaluate("node=>node===document.activeElement")
+            tab.locator('#view-shopping [data-go="meals"]').click()
+            assert tab.locator("#breakfast-monday").input_value() == "Toast and eggs"
+            submit_plan(tab, "breakfast")
+            assert saved(tab)["mealPlans"]["breakfast"]["Monday"] == "Toast and eggs"
+            tab.locator(".brand").click()
+            for name in HUB_PAGES:
+                section(tab, name)
+                assert_no_overflow(tab, "#view-" + name)
+                assert tab.locator(f"#view-{name} h1").evaluate("node=>node===document.activeElement")
+            tab.screenshot(path=str(args.output / "organisation-320.png"), full_page=True)
+            return {"width": 320, "keyboardActivationAndFocus": True,
+                    "typedMenuSurvivesRelatedNavigation": True, "allSectionsFitViewport": True}
+
+        run("320px Home and focused sections support keyboard use and retain a typed menu", phone_organisation, width=320)
+
+        def grocery_quota(context):
+            tab = page(context)
+            section(tab, "shopping")
+            before = saved(tab)
+            tab.evaluate("__rejectTidyWrites=true")
+            grocery(tab, "Oranges", "6")
+            assert saved(tab) == before
+            assert tab.locator("#grocery-title").input_value() == "Oranges"
+            assert tab.locator("#grocery-quantity").input_value() == "6"
+            status = tab.locator("#grocery-status").inner_text().lower()
+            assert re.search(r"not saved|tab only|this tab|saving needs attention", status), status
+            assert tab.locator("#storage-warning").is_visible()
+            backup = download_backup(tab)
+            item, = backup["tasks"]
+            assert item["title"] == "Oranges" and item["quantity"] == "6"
+            tab.evaluate("__rejectTidyWrites=false")
+            tab.locator("#grocery-add").click()
+            assert len(saved(tab)["tasks"]) == 1
+            assert saved(tab)["tasks"][0]["id"] == item["id"]
+            assert saved(tab)["tasks"][0]["quantity"] == "6"
+            assert not tab.locator("#storage-warning").is_visible()
+            assert tab.locator("#grocery-title").input_value() == ""
+            assert saved(tab)["actions"] == []
+            return {"failedWriteNotReportedSaved": True, "typedFieldsRetained": True,
+                    "unsavedItemRecoverableInBackup": True, "retryDoesNotDuplicate": True}
+
+        run("Grocery storage failure keeps the form and backup, and a recovered retry saves once", grocery_quota)
 
         def plans_and_reload(context):
             tab = page(context)
@@ -412,7 +664,7 @@ def main():
             tab.wait_for_function("TidyDemo.getState().mealSnapshot?.state.menuApproved===true")
             assert saved(tab)["mealPlans"]["breakfast"]["Monday"] == "Eggs and toast"
             assert len(saved(tab)["mealSummary"]) == 5
-            tab.screenshot(path=str(OUT / "meals-320.png"))
+            tab.screenshot(path=str(args.output / "meals-320.png"))
             return {"width": 320, "keyboardTabNavigation": True, "previousNext": True, "originalDinnerPlannerWorks": True, "noHorizontalOverflow": True}
 
         run("320px meal slides support keyboard and previous or next navigation while the dinner planner still works", phone_slides, width=320)
@@ -422,7 +674,7 @@ def main():
               "javascriptErrors": errors, "blockedExternalRequests": external,
               "scope": "Isolated browser UI and local data; no retailer transactions, native iPhone alarms or real-device compatibility."}
     suffix = "live" if args.url.startswith("https://") else "local"
-    report_path = OUT / (suffix + "-report.json")
+    report_path = args.output / (suffix + "-report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     passed = sum(result["result"] == "PASS" for result in results)
     print(json.dumps({"passed": passed, "total": len(results), "javascriptErrors": errors,

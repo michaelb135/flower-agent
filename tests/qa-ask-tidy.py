@@ -513,21 +513,27 @@ def main():
             ask(tab, "Set a notification to call Mum tomorrow at 6 pm", "done")
             task, = saved(tab)["tasks"]
             tab.locator('[data-view="today"]').click()
+            assert not tab.locator("#assistant-activity").is_visible()
+            assert_destination(tab, "today")
+            tab.locator('[data-view="assistant"]').click()
+            assert tab.locator("#assistant-activity").is_visible()
             tab.locator("#assistant-activity-open").click()
             assert_destination(tab, "reminders")
             assert record(tab, task["id"], "reminder-tasks").is_visible()
             tab.locator("#assistant-activity-dismiss").click()
             assert not tab.locator("#assistant-activity").is_visible()
             tab.locator('[data-view="today"]').click()
-            tab.locator("#today-appointments").click()
+            tab.locator('#view-today [data-go="tools"]').click()
+            assert_destination(tab, "tools")
+            tab.locator('#view-tools [data-go="appointments"]').click()
             assert_destination(tab, "appointments")
-            tab.locator('[data-view="today"]').click()
-            tab.locator("#today-reminders").click()
+            tab.locator('[data-view="reminders"]').click()
             assert_destination(tab, "reminders")
             assert saved(tab)["tasks"] == [task]
-            return {"receiptReopensSavedRecord": True, "todayShortcuts": True, "dismissPreservesTask": True}
+            return {"receiptHiddenOnUnrelatedPage": True, "receiptPreservedOnAsk": True,
+                    "receiptReopensSavedRecord": True, "homeAndReminderNavigation": True, "dismissPreservesTask": True}
 
-        run("Receipt show-me button and Today shortcuts reopen real reminder or appointment pages", receipt_navigation)
+        run("Receipt stays with Ask and its result while Home and Reminders open their dedicated pages", receipt_navigation)
 
         def past_reminder(tab):
             before = saved(tab)

@@ -28,6 +28,23 @@
 .section-tile small{grid-column:2;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .section-tile-arrow{grid-column:3;grid-row:1 / span 2;align-self:center;color:var(--green)}
 .section-tile:hover{border-color:#9bb29e;background:#f9fbf6}
+.home-directory>.intro{max-width:660px}
+.home-directory .section-group+.section-group{border-top:1px solid var(--line);padding-top:25px;margin-top:32px}
+.everyday-sections{margin-top:24px}
+.everyday-grid .section-tile{min-height:132px;border-color:#c3d3c5;background:#f7faf5}
+.everyday-grid .section-tile strong{font-size:18px}
+.everyday-grid .section-tile small{font-size:13px}
+.everyday-grid .section-tile-icon{background:#e2ece1;color:var(--green)}
+.everyday-grid .section-tile:hover{background:#edf4e9;border-color:#7f9f86}
+.related-links{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.related-links .button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.grocery-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;gap:15px;align-items:end}
+.grocery-fields label{margin:0;min-width:0}
+.grocery-fields .button{min-height:47px}
+.optional-label{font-size:12px;font-weight:400;color:var(--muted)}
+.grocery-capture .error{margin:15px 0 0}
+#grocery-status{margin:13px 0 0;min-height:1.55em}
+#grocery-status:empty{display:none}
 .today-shortcuts{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0}
 .meal-tabs{display:flex;gap:5px;border:1px solid var(--line);padding:5px;border-radius:13px;background:#edf0e8;margin-bottom:13px}
 .meal-tabs [role=tab]{flex:1;min-width:0;min-height:48px;border:0;border-radius:9px;padding:11px 8px;background:transparent;color:var(--muted);font-weight:650;font-size:15px}
@@ -43,6 +60,8 @@
 #view-household .member-list{margin-top:7px}
 @media(max-width:850px){.section-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.app-nav button{font-size:10px;padding-inline:0}.section-group{margin:24px 0}.section-grid{grid-template-columns:1fr;gap:10px}.section-tile{min-height:102px;padding:17px 15px}.section-tile strong{font-size:16px}.section-tile small{font-size:13px}.section-back{margin-bottom:13px}.focused-view>h1{margin-top:0}.weekday-meal-fields{grid-template-columns:1fr;gap:16px}.weekday-meal-fields label:last-child{grid-column:auto}.meal-tabs [role=tab]{font-size:14px;padding:11px 3px}.meal-slide-controls{gap:6px}.meal-slide-controls .button{padding-inline:9px}.today-shortcuts{gap:8px}.today-shortcuts .button{flex:1 1 125px}}
+@media(max-width:700px){.grocery-fields{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}.grocery-fields .button{grid-column:1 / -1;justify-self:start;min-width:140px}}
+@media(max-width:560px){.home-directory .section-group+.section-group{padding-top:22px;margin-top:26px}.everyday-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.everyday-grid .section-tile{grid-template-columns:minmax(0,1fr) 14px;grid-template-rows:34px auto 1fr;gap:8px;min-height:158px;padding:15px 13px}.everyday-grid .section-tile-icon{grid-column:1;grid-row:1;width:32px;height:32px;border-radius:10px;font-size:22px}.everyday-grid .section-tile strong{grid-column:1 / -1;grid-row:2;font-size:16px;line-height:1.3}.everyday-grid .section-tile small{grid-column:1 / -1;grid-row:3;font-size:12px;line-height:1.45}.everyday-grid .section-tile-arrow{grid-column:2;grid-row:1}.related-links{gap:8px}.related-links .button{flex:1 1 140px}.grocery-fields{grid-template-columns:1fr;gap:14px}.grocery-fields input{font-size:16px}.grocery-fields .button{width:100%;grid-column:auto}.grocery-capture{padding-top:20px;padding-bottom:20px}}
 /* Calendar setup and daily planning stay on separate, focused pages. */
 .calendar-status,#planning-settings-status{min-height:1.55em;margin-top:14px}
 #calendar-file{padding:10px;font-size:14px;overflow:hidden}

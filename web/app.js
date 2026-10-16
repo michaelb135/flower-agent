@@ -80,14 +80,15 @@
     try{refreshSavedData();previous=C.validateSnapshot(state);work();state=C.validateSnapshot(state);const saved=save();renderAll();if(message)toast(message+(saved?'':' · not saved locally'));return true;}
     catch(problem){state=previous;renderAll();toast(problem.message+' The previous data was kept.');return false;}
   }
-  function showView(view,focus=true){
+  function showView(view,focus=true,replace=false){
     const parts=view.split('/');view=parts[0];if(view==='meals'&&MEAL_SLIDES.includes(parts[1]))ui.mealSlide=parts[1];
-    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming','calendar','planning','planning-settings'].includes(view))view='today';
+    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming','calendar','planning','planning-settings'].includes(view))view='tools';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
     const parentView=['today','assistant','family','reminders','tools'].includes(view)?view:'tools';
     for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===parentView)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
-    history.replaceState(null,'','#'+view+(view==='meals'?'/'+ui.mealSlide:''));renderAll();
+    const route='#'+view+(view==='meals'?'/'+ui.mealSlide:'');
+    if(location.hash!==route)history[replace?'replaceState':'pushState'](null,'',route);renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
   }
   function populatePeople(select,first='All household',firstValue='all'){
@@ -127,7 +128,7 @@
     $('today-date').textContent=new Intl.DateTimeFormat('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:'Asia/Dubai'}).format(new Date())+' · Dubai time';
     const stats=$('today-stats');stats.replaceChildren();for(const [count,label] of [[open.filter(task=>task.dueDate===date).length,'Due today'],[open.filter(task=>task.dueDate&&task.dueDate<date).length,'Unfinished'],[state.actions.filter(action=>action.status==='needs_review').length,'Drafts to review']]){const card=el('div',undefined,'stat');card.append(el('strong',String(count)),el('span',label));stats.append(card);}
     taskList('today-tasks',visible.filter(task=>task.dueDate&&task.dueDate<=date),'Nothing dated needs attention. Add a task when you need one.');
-    taskList('inbox-tasks',open.filter(task=>!task.dueDate),'Your undated list is clear.');
+    taskList('inbox-tasks',open.filter(task=>task.type==='task'&&!task.dueDate),'Your undated task list is clear. Groceries and appointments stay in their own sections.');
     taskList('upcoming-tasks',open.filter(task=>task.dueDate>date),'No upcoming items entered yet.');
     const times=new Map();for(const task of visible.filter(task=>task.dueDate===date&&task.dueTime)){times.set(task.dueTime,(times.get(task.dueTime)||0)+1);}
     $('today-conflicts').textContent=[...times].filter(([,count])=>count>1).map(([time,count])=>`${count} items share ${time}; check their timing.`).join(' ');
@@ -136,10 +137,10 @@
   function renderFamily(){
     $('member-list').replaceChildren();for(const member of state.members){const assigned=state.tasks.filter(task=>task.status==='open'&&task.assigneeId===member.id).length;$('member-list').append(button(`${member.name} · ${assigned} open`,()=>openMember(member),'member-button'));}
     const search=$('task-search').value.trim().toLocaleLowerCase(),category=$('category-filter').value,person=$('person-filter').value,status=$('status-filter').value;
-    taskList('family-tasks',state.tasks.filter(task=>(category==='all'||task.category===category)&&(person==='all'||task.assigneeId===person)&&(status==='all'||task.status===status)&&(!search||(task.title+' '+task.notes).toLocaleLowerCase().includes(search))),'No matching tasks. Add one or change the filters.');
+    taskList('family-tasks',state.tasks.filter(task=>task.type==='task'&&(category==='all'||task.category===category)&&(person==='all'||task.assigneeId===person)&&(status==='all'||task.status===status)&&(!search||(task.title+' '+task.notes).toLocaleLowerCase().includes(search))),'No matching tasks. Add one or change the filters. Groceries and appointments have their own sections.');
   }
   function renderRoutines(){
-    taskList('routine-tasks',state.tasks.filter(task=>task.status==='open'&&task.repeat!=='none'),'No repeating jobs yet. Add a routine with its first date.');
+    taskList('routine-tasks',state.tasks.filter(task=>task.type==='task'&&task.status==='open'&&task.repeat!=='none'),'No repeating tasks yet. Add a routine with its first date.');
     $('pause-alerts').textContent=state.settings.remindersPaused?'Resume alerts':'Pause alerts';
     $('reminder-summary').textContent=state.settings.remindersPaused?'All demo alerts are paused.':`Task alerts are active while open. Daily check-in ${state.settings.checkinEnabled?'at '+state.settings.checkinTime+' Dubai time':'is turned off'}.`;
   }
@@ -183,7 +184,7 @@
   }
   function renderShopping(){
     const items=state.tasks.filter(task=>task.status==='open'&&task.type==='grocery');
-    taskList('shopping-tasks',items,'No household groceries requested yet. Tell Tidy what you need.');
+    taskList('shopping-tasks',items,'Your grocery list is empty. Add an item above.');
     const list=$('meal-shopping-items');list.replaceChildren();
     if(ui.mealVerified&&ui.groceriesApproved){
       $('meal-shopping-status').textContent='From your approved grocery draft, after checking the kitchen. No order placed.';
@@ -191,6 +192,24 @@
       if(!ui.mealGroceries.length)list.append(el('li','Nothing missing from your reviewed meal plan.'));
     }else $('meal-shopping-status').textContent='Check the kitchen and approve the meal grocery draft to include its ingredients here and in the download.';
     $('download-shopping').disabled=!items.length&&!(ui.mealVerified&&ui.groceriesApproved);
+  }
+  function saveGrocery(event){
+    event.preventDefault();error('grocery-error','');$('grocery-status').textContent='';
+    try{
+      if(refreshSavedData())renderAll();
+      const title=$('grocery-title').value.trim(),quantity=$('grocery-quantity').value.trim();
+      if(!title)throw Error('Type the item you need.');
+      if(title.length>300)throw Error('Keep the item name to 300 characters or fewer.');
+      if(quantity.length>120)throw Error('Keep the quantity to 120 characters or fewer.');
+      const existing=state.tasks.find(task=>task.type==='grocery'&&task.status==='open'&&task.title.toLocaleLowerCase()===title.toLocaleLowerCase());
+      if(existing?.quantity&&quantity&&existing.quantity!==quantity){ui.highlightTaskId=existing.id;renderShopping();throw Error('“'+existing.title+'” is already on your list with quantity “'+existing.quantity+'”. Use its Edit button to review the amount. Your entry has been kept.');}
+      const changed=!existing||Boolean(!existing.quantity&&quantity);
+      const task=existing?(changed?C.updateTask(state,existing.id,{quantity}):existing):C.createTask(state,{title,quantity,type:'grocery',category:'Shopping'});
+      const saved=changed||ui.saveFailed?save():!ui.storageLocked&&!ui.mealConflict;
+      ui.highlightTaskId=task.id;renderAll();
+      if(saved){$('grocery-title').value='';$('grocery-quantity').value='';$('grocery-status').textContent=existing?(changed?'Quantity saved for “'+task.title+'”.':'“'+task.title+'” is already on your grocery list.'):'Added “'+task.title+'” to your grocery list.';$('grocery-title').focus();}
+      else $('grocery-status').textContent='Not saved on this browser. Your item and entry are kept in this tab; download a backup before closing.';
+    }catch(problem){error('grocery-error',problem.message);}
   }
   function downloadShopping(){
     const items=state.tasks.filter(task=>task.status==='open'&&task.type==='grocery'),lines=['Tidy shopping list · '+C.today(),'No order has been placed. Check amounts, package sizes and prices before buying.','','HOUSEHOLD REQUESTS'];
@@ -228,7 +247,7 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();
   }
   function planningProfile(){return state.planningProfile||P.defaults();}
   function beginPlanningEdit(){if(!ui.planningEditing){ui.planningEditing=true;ui.planningBaseline=copy(planningProfile());}}
@@ -437,7 +456,7 @@
   }
   function response(message){$('assistant-response').textContent=message;$('assistant-response').hidden=false;$('assistant-followup').replaceChildren();}
   function renderActivity(){
-    const activity=ui.activity;$('assistant-activity').hidden=!activity||activity.dismissed;if(!activity)return;
+    const activity=ui.activity;$('assistant-activity').hidden=!activity||activity.dismissed||ui.view!=='assistant'&&ui.view!==activity.view;if(!activity)return;
     $('assistant-activity').dataset.status=activity.status;$('assistant-activity-title').textContent=activity.title;$('assistant-activity-message').textContent=activity.message;$('assistant-activity-reply').textContent=activity.reply;
     const steps=$('assistant-activity-steps');steps.replaceChildren();
     for(const step of activity.steps){const item=el('li',(step.status==='done'?'✓ ':step.status==='error'?'! ':'')+step.label,'activity-step');item.dataset.status=step.status;steps.append(item);}
@@ -446,7 +465,7 @@
     $('assistant-activity-undo').hidden=!ui.undoCapture;$('assistant-activity-undo').disabled=ui.captureBusy;
     $('assistant-activity-dismiss').disabled=ui.captureBusy;
   }
-  function startActivity(){ui.undoCapture=null;ui.activity={status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
+  function startActivity(){ui.undoCapture=null;ui.activity={view:ui.view,status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
   function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
   function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
   function destination(task){return task.type==='appointment'?'appointments':task.type==='grocery'?'shopping':task.planningReason&&task.dueDate&&task.dueTime?'planning':task.remindAt!==null?'reminders':'family';}
@@ -478,7 +497,7 @@
   function finishTaskActivity(task,saved,existing=false){
     if(ui.undoCapture?.id===task.id&&!same(ui.undoCapture.baseline,task))ui.undoCapture=null;
     const reminder=task.remindAt!==null,appointment=task.type==='appointment';
-    ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;ui.activity.resumeLabel=null;
+    ui.activity.view=destination(task);ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;ui.activity.resumeLabel=null;
     ui.activity.status=saved?'done':'error';
     ui.activity.reply=taskReply(task,saved,existing);
     ui.activity.title=!saved?'Not saved on this browser':existing?'Already on your shopping list':appointment?'Appointment added to your plan':reminder?'Reminder set':task.type==='grocery'?'Added to your shopping list':'Task added';
@@ -546,7 +565,7 @@
     ui.activity.status='waiting';ui.activity.title='A little more information';ui.activity.reply='I can help, but I need a little more detail before I save anything. Please check the details below.';ui.activity.message=result.message;activityStep(0,'done');activityStep(1,'working','Waiting for your details');
     const resume=()=>openTask(draft,null,result.message,result.reminderRequested===true,flow);ui.activity.resume=resume;
     $('assistant-followup').append(button('Fill in the missing details',resume,'button'));
-    if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){showView(draft.type==='appointment'?'appointments':'reminders');resume();}
+    if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){ui.activity.view=draft.type==='appointment'?'appointments':'reminders';showView(ui.activity.view);resume();}
     renderActivity();
   }
   async function capture(text,suppliedResult=null){
@@ -554,7 +573,7 @@
     try{
       await paintActivity();if(refreshSavedData())renderAll();
       const result=suppliedResult||A.parse(text,clarificationOptions(text));ui.activity.assumptions=result.assumptions||[];response(result.message);activityStep(0,'done');
-      if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.reply='Here’s what I found in Tidy. '+result.message;ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
+      if(result.kind==='answer'){ui.activity.view='today';ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.reply='Here’s what I found in Tidy. '+result.message;ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
       if(result.kind==='clarify'){waitForTaskDetails(text,result);return;}
       ui.activity.reply=result.kind==='action'?'Of course—I’m preparing a draft for you to review.':result.kind==='grocery'?'Of course—I’m checking your shopping list for “'+result.draft.title+'”.':result.draft.type==='appointment'?'Of course—I’m adding that appointment to your plan.':result.draft.remindAt!==null?'Of course—I’m setting up your reminder.':'Of course—I’m adding that to your tasks.';
       activityStep(1,'working',result.kind==='action'?'Preparing your draft':'Saving your item');await paintActivity();
@@ -562,7 +581,7 @@
       if(result.kind==='action'){
         const action={id:id('request'),kind:result.action.kind,title:result.action.title,details:result.action.details||'',provider:'',link:'',status:'needs_review',createdAt:Date.now()};
         state=C.validateSnapshot({...state,actions:[...state.actions,action]});const saved=save();renderAll();
-        ui.activity.target={kind:'action',id:action.id};ui.activity.status=saved?'done':'error';ui.activity.title=saved?(action.kind==='booking'?'Appointment request ready for review':'Draft ready for review'):'Draft kept in this tab only';
+        ui.activity.view=action.kind==='booking'?'appointments':'requests';ui.activity.target={kind:'action',id:action.id};ui.activity.status=saved?'done':'error';ui.activity.title=saved?(action.kind==='booking'?'Appointment request ready for review':'Draft ready for review'):'Draft kept in this tab only';
         ui.activity.message='Prepared: '+action.title+'. '+(saved?'Saved on this browser.':'Not saved locally; download a backup before closing.')+' Your approval is needed. Nothing has been booked, purchased or sent.';
         ui.activity.reply=saved?'I’ve prepared your '+(action.kind==='booking'?'appointment':action.kind==='purchase'?'purchase':'message')+' request for review. Nothing has been booked, purchased or sent.':'I’ve prepared your request in this tab, but I couldn’t save it. Please download a backup before closing. Nothing has been booked, purchased or sent.';
         activityStep(1,saved?'done':'error',saved?'Saved a draft for review':'Local saving failed');revealActivityTarget();activityStep(2,'done',action.kind==='booking'?'Opened appointment requests':'Opened your requests');response(ui.activity.message);$('assistant-followup').append(button('Review draft',()=>openAction(action,action.id)));return;
@@ -805,7 +824,7 @@
     $(type+'-form').addEventListener('submit',event=>saveMealPlan(event,type));
     for(const day of MEAL_DAYS){const input=$(type+'-'+day.toLowerCase());input.addEventListener('focus',()=>beginMealPlanEdit(type));input.addEventListener('input',()=>{beginMealPlanEdit(type);ui.mealStatuses[type]='Your changes have not been saved yet.';error(type+'-error','');renderMealPlans();});}
   }
-  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('today');});
+  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('tools');});
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
@@ -819,8 +838,7 @@
   $('assistant-clarify-cancel').addEventListener('click',()=>{cancelQuickQuestion();$('assistant-clarify-dialog').close();});
   $('assistant-clarify-dialog').addEventListener('cancel',cancelQuickQuestion);
   $('assistant-clarify-dialog').addEventListener('close',cancelQuickQuestion);
-  for(const name of ['today-reminders','routines-reminders'])$(name).addEventListener('click',()=>showView('reminders'));
-  for(const name of ['today-appointments','family-appointments'])$(name).addEventListener('click',()=>showView('appointments'));
+  $('routines-reminders').addEventListener('click',()=>showView('reminders'));
   $('reminders-settings').addEventListener('click',showSettings);
   $('reminders-add').addEventListener('click',()=>{startActivity();waitForTaskDetails('',{kind:'clarify',reminderRequested:true,draft:{title:'Reminder'},message:'Choose the date and time for your reminder. Keep Tidy open for the alert.'});});
   $('appointments-add').addEventListener('click',()=>{startActivity();waitForTaskDetails('',{kind:'clarify',appointmentRequested:true,draft:{type:'appointment',category:'Health'},message:'What is the appointment for, and when is it? This saves a local record; it does not book with a provider.'});});
@@ -842,7 +860,8 @@
   $('dismiss-alert').addEventListener('click',()=>{$('alert-banner').hidden=true;});
   $('export-backup').addEventListener('click',()=>{try{download('Tidy-backup-'+C.today()+'.json',C.backupJSON(state));}catch(problem){error('backup-error',problem.message);}});
   $('export-recovery').addEventListener('click',()=>{if(ui.recoveryText!==null)download('Tidy-saved-data-for-recovery.json',ui.recoveryText);});$('import-backup').addEventListener('change',importBackup);
-  $('load-examples').addEventListener('click',loadExamples);$('today-meals').addEventListener('click',()=>showView('meals'));$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});
+  $('load-examples').addEventListener('click',loadExamples);$('show-meals').addEventListener('click',showMeals);$('hide-meals').addEventListener('click',()=>{$('meals-section').hidden=true;$('show-meals').focus();});
+  $('grocery-form').addEventListener('submit',saveGrocery);
   $('shopping-meals').addEventListener('click',showMeals);$('download-shopping').addEventListener('click',downloadShopping);
   for(const [name,url] of [['Waitrose UAE','https://www.waitrose.ae/'],['Kibsons','https://www.kibsons.com/'],['Carrefour UAE','https://www.carrefouruae.com/'],['Amazon UAE','https://www.amazon.ae/']])$('provider-list').append(button(name,()=>openWebsite(url,name)));
   $('health-square-url').addEventListener('focus',beginHealthSquareEdit);
@@ -869,7 +888,8 @@
   $('meals-frame').addEventListener('load',()=>{ui.mealReady=true;trackMealEdits();postMealRestore();});
   window.addEventListener('storage',event=>{if(event.key!==KEY&&event.key!==null)return;try{if(refreshSavedData()){renderAll();toast('Saved data updated from another tab on this browser.');}}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
-  setupVoice();showView(location.hash.slice(1)||'today',false);setInterval(checkReminders,15000);checkReminders();
+  window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'tools',true,true));
+  setupVoice();showView(location.hash.slice(1)||'tools',false,true);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
   // The iframe may finish loading before the parent registers its listeners.
   postMealRestore();
