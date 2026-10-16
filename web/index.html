@@ -16,19 +16,35 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#tools" aria-label="Tidy home"><span class="logo" aria-hidden="true">t</span><span>tidy<small>your family helper</small></span></a>
+      <a class="brand" href="#today" aria-label="Tidy today"><span class="logo" aria-hidden="true">t</span><span>tidy<small>your family helper</small></span></a>
       <div class="top-actions"><span class="save-indicator" id="save-status" role="status">Opening saved data…</span><button class="icon-button" id="open-settings" aria-label="Settings and backups">Settings</button></div>
     </header>
     <div class="demo-note"><strong>Tidy web app.</strong> Tasks and meals save on this browser when storage is available. Calendar accounts need connection setup. Tidy data does not sync with other phones, and retailer services are not connected.</div>
     <div class="storage-warning" id="storage-warning" role="alert" hidden></div>
     <div class="notice-bar" id="alert-banner" role="status" hidden><div id="alert-content"></div><button class="button small secondary" id="dismiss-alert">Dismiss</button></div>
-    <nav class="app-nav" aria-label="Main navigation">
-      <button type="button" data-view="tools" aria-current="page"><span aria-hidden="true">▦</span>Home</button>
-      <button type="button" data-view="today"><span aria-hidden="true">☀</span>Today</button>
-      <button type="button" data-view="assistant"><span aria-hidden="true">✳</span>Ask Tidy</button>
-      <button type="button" data-view="family"><span aria-hidden="true">✓</span>Tasks</button>
-      <button type="button" data-view="reminders"><span aria-hidden="true">◷</span>Reminders</button>
-    </nav>
+    <div class="navigation-shell">
+      <div class="navigation-guidance"><p id="navigation-hint">Swipe or use the arrows for more sections.</p><div class="navigation-arrows"><button type="button" id="navigation-previous" aria-label="Previous sections" aria-controls="main-navigation" disabled>←</button><button type="button" id="navigation-next" aria-label="More sections" aria-controls="main-navigation">→</button></div></div>
+      <nav class="app-nav" id="main-navigation" aria-label="Main navigation" aria-describedby="navigation-hint">
+        <button type="button" data-view="today" aria-current="page"><span aria-hidden="true">☀</span>Today</button>
+        <button type="button" data-view="assistant"><span aria-hidden="true">✳</span>Ask Tidy</button>
+        <button type="button" data-view="family"><span aria-hidden="true">✓</span>Tasks</button>
+        <button type="button" data-view="meals"><span aria-hidden="true">◒</span>Menu</button>
+        <button type="button" data-view="shopping"><span aria-hidden="true">≡</span>Groceries</button>
+        <button type="button" data-view="reminders"><span aria-hidden="true">◷</span>Reminders</button>
+        <button type="button" data-view="appointments"><span aria-hidden="true">◴</span>Appointments</button>
+        <button type="button" data-view="calendar"><span aria-hidden="true">▦</span>Calendar</button>
+        <button type="button" data-view="planning"><span aria-hidden="true">☀</span>My day plan</button>
+        <button type="button" data-view="routines"><span aria-hidden="true">↻</span>Routines</button>
+        <button type="button" data-view="stores"><span aria-hidden="true">↗</span>Shopping websites</button>
+        <button type="button" data-view="household"><span aria-hidden="true">♧</span>Household</button>
+        <button type="button" data-view="requests"><span aria-hidden="true">✓</span>Requests to review</button>
+        <button type="button" data-view="health"><span aria-hidden="true">+</span>Clinic website</button>
+        <button type="button" data-view="inbox"><span aria-hidden="true">□</span>Undated tasks</button>
+        <button type="button" data-view="upcoming"><span aria-hidden="true">▦</span>Coming up</button>
+        <button type="button" data-view="planning-settings"><span aria-hidden="true">◷</span>My usual hours</button>
+        <button type="button" data-view="tools"><span aria-hidden="true">▦</span>Home</button>
+      </nav>
+    </div>
     <main>
 <section class="card assistant-activity" id="assistant-activity" role="status" aria-live="polite" aria-atomic="false" aria-labelledby="assistant-activity-title" hidden>
         <p class="eyebrow">Ask Tidy</p><h2 id="assistant-activity-title" tabindex="-1">Your request</h2>
@@ -37,7 +53,7 @@
         <p id="assistant-activity-message" class="helper"></p>
         <div class="assistant-activity-actions"><button type="button" class="button secondary small" id="assistant-activity-open" hidden>Show me</button><button type="button" class="button secondary small" id="assistant-activity-edit" hidden>Edit details</button><button type="button" class="button secondary small" id="assistant-activity-undo" hidden>Undo</button><button type="button" class="button text small" id="assistant-activity-dismiss">Dismiss</button></div>
       </section>
-      <section class="view" id="view-today" aria-labelledby="today-title" hidden>
+      <section class="view" id="view-today" aria-labelledby="today-title">
         <div class="page-heading"><div><p class="eyebrow" id="today-date"></p><h1 id="today-title" tabindex="-1">Today</h1><p class="intro">Focus on what needs doing today.</p></div><button type="button" class="button" id="today-add">+ Add something</button></div>
         <div class="stats" id="today-stats"></div>
         <section class="card"><div class="section-heading"><h2>What needs attention</h2><label class="compact-field">Show<select id="today-person" aria-label="Whose tasks to show today"></select></label></div><div id="today-conflicts" class="helper"></div><div id="today-tasks" class="task-list"></div></section>
@@ -77,7 +93,7 @@
         <section class="card"><h2>Saved appointments</h2><div id="appointment-tasks" class="task-list"></div></section>
         <section class="card"><h2>Appointment requests to review</h2><p class="helper">These requests still need your review and a separate booking with the provider.</p><div id="appointment-requests"></div></section>
       </section>
-      <section class="view home-directory" id="view-tools" aria-labelledby="tools-title">
+      <section class="view home-directory" id="view-tools" aria-labelledby="tools-title" hidden>
         <p class="eyebrow">A place for each thing</p><h1 id="tools-title" tabindex="-1">Home</h1><p class="intro">Choose a section to get started. Your menu, groceries and other responsibilities each have their own space.</p>
         <section class="section-group everyday-sections" aria-labelledby="everyday-group-title"><h2 id="everyday-group-title">Everyday sections</h2><div class="section-grid everyday-grid">
           <button type="button" class="section-tile" id="nav-meals" data-go="meals"><span class="section-tile-icon" aria-hidden="true">◒</span><strong>Menu</strong><small>Plan breakfast, lunch and dinner.</small><span class="section-tile-arrow" aria-hidden="true">→</span></button>

@@ -85,12 +85,23 @@
     if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming','calendar','planning','planning-settings'].includes(view))view='tools';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
-    const parentView=['today','assistant','family','reminders','tools'].includes(view)?view:'tools';
-    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===parentView)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
+    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===view)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
+    revealNavigationButton($('main-navigation').querySelector('[aria-current="page"]'));
     const route='#'+view+(view==='meals'?'/'+ui.mealSlide:'');
     if(location.hash!==route)history[replace?'replaceState':'pushState'](null,'',route);renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
   }
+  function updateNavigationControls(){
+    const strip=$('main-navigation'),end=Math.max(0,strip.scrollWidth-strip.clientWidth);
+    $('navigation-previous').disabled=strip.scrollLeft<=1;$('navigation-next').disabled=strip.scrollLeft>=end-1;
+  }
+  function revealNavigationButton(button){
+    if(!button)return;const strip=$('main-navigation'),bounds=strip.getBoundingClientRect(),item=button.getBoundingClientRect();
+    if(item.left<bounds.left+6)strip.scrollLeft-=bounds.left+6-item.left;
+    else if(item.right>bounds.right-6)strip.scrollLeft+=item.right-bounds.right+6;
+    updateNavigationControls();
+  }
+  function scrollNavigation(direction){const strip=$('main-navigation');strip.scrollLeft+=direction*Math.max(100,strip.clientWidth*.8);updateNavigationControls();}
   function populatePeople(select,first='All household',firstValue='all'){
     const selected=select.value;select.replaceChildren();const option=el('option',first);option.value=firstValue;select.append(option);
     for(const member of state.members){const item=el('option',member.name);item.value=member.id;select.append(item);}
@@ -816,6 +827,14 @@
   $('calendar-onboarding-later').addEventListener('click',()=>{rememberWelcome('later');$('calendar-onboarding-dialog').close();});
   $('calendar-onboarding-dialog').addEventListener('close',()=>{if(!ui.welcomeChoice)rememberWelcome('later');});
   for(const nav of document.querySelectorAll('[data-view]'))nav.addEventListener('click',()=>showView(nav.dataset.view));
+  $('navigation-previous').addEventListener('click',()=>scrollNavigation(-1));$('navigation-next').addEventListener('click',()=>scrollNavigation(1));
+  $('main-navigation').addEventListener('scroll',updateNavigationControls,{passive:true});
+  $('main-navigation').addEventListener('keydown',event=>{
+    const tabs=[...$('main-navigation').querySelectorAll('[data-view]')],index=tabs.indexOf(event.target);if(index<0)return;let next;
+    if(event.key==='ArrowRight')next=Math.min(tabs.length-1,index+1);else if(event.key==='ArrowLeft')next=Math.max(0,index-1);else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;
+    event.preventDefault();tabs[next].focus({preventScroll:true});revealNavigationButton(tabs[next]);
+  });
+  window.addEventListener('resize',()=>revealNavigationButton($('main-navigation').querySelector('[aria-current="page"]')));
   for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>showView(link.dataset.go));
   for(const tab of document.querySelectorAll('button[data-meal]')){
     tab.addEventListener('click',()=>selectMealSlide(tab.dataset.meal));
@@ -827,7 +846,7 @@
     $(type+'-form').addEventListener('submit',event=>saveMealPlan(event,type));
     for(const day of MEAL_DAYS){const input=$(type+'-'+day.toLowerCase());input.addEventListener('focus',()=>beginMealPlanEdit(type));input.addEventListener('input',()=>{beginMealPlanEdit(type);ui.mealStatuses[type]='Your changes have not been saved yet.';error(type+'-error','');renderMealPlans();});}
   }
-  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('tools');});
+  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('today');});
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
@@ -891,8 +910,8 @@
   $('meals-frame').addEventListener('load',()=>{ui.mealReady=true;trackMealEdits();postMealRestore();});
   window.addEventListener('storage',event=>{if(event.key!==KEY&&event.key!==null)return;try{if(refreshSavedData()){renderAll();toast('Saved data updated from another tab on this browser.');}}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
-  window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'tools',true,true));
-  setupVoice();showView(location.hash.slice(1)||'tools',false,true);setInterval(checkReminders,15000);checkReminders();
+  window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'today',true,true));
+  setupVoice();showView(location.hash.slice(1)||'today',false,true);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
   // The iframe may finish loading before the parent registers its listeners.
   postMealRestore();
