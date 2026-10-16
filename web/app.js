@@ -9,7 +9,7 @@
   const $=id=>document.getElementById(id);
   const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
-  Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
+  Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,pendingCapture:null,undoCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
   Object.assign(ui,{planningEditing:false,planningBaseline:null,planningStatus:'',planResults:new Map(),calendarImportBusy:false,welcomeChoice:null});
   Object.assign(ui,{connectionConfig:{...DEFAULT_CONNECTION_CONFIG},connectionConfigBaseline:null,connectionConfigEditing:false,connectionConfigStatus:'',connector:null,accountProvider:null,accountBusy:false,accountMessage:''});
@@ -442,9 +442,11 @@
     const steps=$('assistant-activity-steps');steps.replaceChildren();
     for(const step of activity.steps){const item=el('li',(step.status==='done'?'✓ ':step.status==='error'?'! ':'')+step.label,'activity-step');item.dataset.status=step.status;steps.append(item);}
     $('assistant-activity-open').hidden=!activity.target&&!activity.resume;$('assistant-activity-open').textContent=activity.resume?(activity.resumeLabel||'Continue with the details'):'Show me the result';$('assistant-activity-open').disabled=ui.captureBusy;
+    $('assistant-activity-edit').hidden=activity.target?.kind!=='task';$('assistant-activity-edit').disabled=ui.captureBusy;
+    $('assistant-activity-undo').hidden=!ui.undoCapture;$('assistant-activity-undo').disabled=ui.captureBusy;
     $('assistant-activity-dismiss').disabled=ui.captureBusy;
   }
-  function startActivity(){ui.activity={status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
+  function startActivity(){ui.undoCapture=null;ui.activity={status:'working',title:'Working on your request',reply:'Of course—give me a moment to check your request.',message:'Checking what you asked Tidy to do.',steps:[{label:'Understand your request',status:'working'},{label:'Save the result',status:'pending'},{label:'Show you the result',status:'pending'}],target:null,resume:null,dismissed:false};renderActivity();$('assistant-activity').scrollIntoView({block:'start',behavior:'instant'});}
   function activityStep(index,status,label){const step=ui.activity.steps[index];step.status=status;if(label)step.label=label;renderActivity();}
   function paintActivity(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
   function destination(task){return task.type==='appointment'?'appointments':task.type==='grocery'?'shopping':task.planningReason&&task.dueDate&&task.dueTime?'planning':task.remindAt!==null?'reminders':'family';}
@@ -474,6 +476,7 @@
     if(focusCard){const card=[...$('view-'+view).querySelectorAll(target.kind==='action'?'[data-action-id]':'[data-task-id]')].find(card=>(target.kind==='action'?card.dataset.actionId:card.dataset.taskId)===item.id);if(card){card.focus({preventScroll:true});card.scrollIntoView({block:'center',behavior:'instant'});}}
   }
   function finishTaskActivity(task,saved,existing=false){
+    if(ui.undoCapture?.id===task.id&&!same(ui.undoCapture.baseline,task))ui.undoCapture=null;
     const reminder=task.remindAt!==null,appointment=task.type==='appointment';
     ui.activity.target={kind:'task',id:task.id};ui.activity.resume=null;ui.activity.resumeLabel=null;
     ui.activity.status=saved?'done':'error';
@@ -485,22 +488,72 @@
     else if(task.type==='grocery')message+='Your list is ready to review. No order has been placed.';
     else message+='Saved in your responsibilities.';
     if(!saved)message+=' This change is kept in this tab only. Download a backup before closing.';
-    ui.activity.message=message+(task.planningReason?' '+task.planningReason:'');activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+({appointments:'appointments',reminders:'reminders',shopping:'shopping list',family:'responsibilities',planning:'day plan'})[destination(task)]);
+    const assumption=(ui.activity.assumptions||[]).join(' ');if(assumption)ui.activity.reply+=' '+assumption;
+    ui.activity.message=message+(task.planningReason?' '+task.planningReason:'')+(assumption?' '+assumption:'');activityStep(0,'done');activityStep(1,saved?'done':'error',existing?'Found your existing item':saved?'Saved on this browser':'Local saving failed');activityStep(2,'done','Opened your '+({appointments:'appointments',reminders:'reminders',shopping:'shopping list',family:'responsibilities',planning:'day plan'})[destination(task)]);
     response(message);revealActivityTarget();renderActivity();
+  }
+  function clarificationOptions(text){return {text,now:Date.now(),members:state.members,tasks:state.tasks,planningEnabled:planningProfile().enabled,efficientMode:true};}
+  function showQuickQuestion(invalidAnswer=false){
+    const pending=ui.pendingCapture;if(!pending)return;
+    const plan=A.planClarification(pending.result,clarificationOptions(pending.text));
+    if(plan.advanced){openCaptureDetails();return;}
+    $('assistant-clarify-question').textContent=plan.question;
+    $('assistant-clarify-context').textContent=pending.result.draft?.title?'For “'+pending.result.draft.title+'”. I’ve kept the details you already gave me.':'I’ve kept the details you already gave me.';
+    $('assistant-clarify-answer').value='';error('assistant-clarify-error',invalidAnswer?pending.result.message:'');
+    $('assistant-clarify-status').textContent=pending.result.notice||(/already passed/.test(pending.result.message)?'That time has already passed in Dubai. Please choose a future date and time.':'Nothing new is saved until the missing details are clear.');
+    const choices=$('assistant-clarify-choices');choices.replaceChildren();
+    for(const choice of plan.choices)choices.append(button(choice.label,()=>void answerQuickQuestion(choice.patch)));
+    ui.activity.reply=plan.question;ui.activity.message=pending.result.message;response(plan.question);renderActivity();
+    if(!$('assistant-clarify-dialog').open)$('assistant-clarify-dialog').showModal();
+    (choices.querySelector('button')||$('assistant-clarify-answer')).focus();
+  }
+  function openCaptureDetails(){
+    const pending=ui.pendingCapture;if(!pending)return;
+    ui.pendingCapture=null;$('assistant-clarify-dialog').close();
+    const resume=()=>openTask(pending.result.draft||{},null,pending.result.message,pending.result.reminderRequested===true,pending);
+    ui.activity.resume=resume;ui.activity.resumeLabel='Review details';resume();renderActivity();
+  }
+  async function answerQuickQuestion(answer){
+    if(ui.captureBusy||!ui.pendingCapture)return;
+    if(refreshSavedData())renderAll();
+    const pending=ui.pendingCapture,result=A.resolveClarification(pending.result,answer,clarificationOptions(pending.text));
+    if(result.kind==='clarify'){pending.result=result;ui.lastDraft=result.draft;showQuickQuestion(true);return;}
+    ui.pendingCapture=null;$('assistant-clarify-dialog').close();await capture(pending.text,result);
+  }
+  function cancelQuickQuestion(){
+    if(!ui.pendingCapture)return;ui.pendingCapture=null;
+    ui.activity.status='waiting';ui.activity.title='Request cancelled';ui.activity.reply='Okay—I haven’t saved anything new.';ui.activity.message='Nothing new was saved. You can start another request whenever you are ready.';ui.activity.resume=null;ui.activity.resumeLabel=null;
+    response(ui.activity.message);renderActivity();
+  }
+  function undoAssistantTask(){
+    if(ui.captureBusy||!ui.undoCapture)return;
+    try{
+      if(refreshSavedData())renderAll();const receipt=ui.undoCapture,current=state.tasks.find(task=>task.id===receipt.id);
+      if(!current||!same(current,receipt.baseline))throw Error('This item changed after I added it. I kept the latest version; use Edit details to review it.');
+      if(ui.storageLocked||ui.mealConflict)throw Error('Undo could not be saved safely. Your item is kept; download a backup before changing it.');
+      const previous=C.validateSnapshot(state);C.deleteTask(state,receipt.id);
+      if(!save()){state=previous;renderAll();throw Error('Undo could not be saved. Your item is kept in this tab; download a backup before closing.');}
+      ui.undoCapture=null;ui.activity.target=null;ui.activity.status='done';ui.activity.title='Undone';ui.activity.reply='I’ve removed the item I just added.';ui.activity.message='Removed “'+receipt.baseline.title+'”.';ui.activity.steps=[{label:'Removed the new item',status:'done'}];response(ui.activity.message);renderAll();renderActivity();
+    }catch(problem){ui.undoCapture=null;ui.activity.reply=problem.message;ui.activity.message=problem.message;response(problem.message);renderActivity();}
   }
   function waitForTaskDetails(text,result){
     const draft=result.draft||{title:text,category:'Home'},flow={text,result};ui.lastDraft=draft;
+    const question=A.planClarification(result,clarificationOptions(text));
+    if(!question.advanced){
+      ui.pendingCapture=flow;ui.activity.status='waiting';ui.activity.title='One quick question';activityStep(0,'done');activityStep(1,'working','Waiting for one answer');
+      ui.activity.resume=()=>showQuickQuestion();ui.activity.resumeLabel='Answer one question';showView('assistant');showQuickQuestion();return;
+    }
     ui.activity.status='waiting';ui.activity.title='A little more information';ui.activity.reply='I can help, but I need a little more detail before I save anything. Please check the details below.';ui.activity.message=result.message;activityStep(0,'done');activityStep(1,'working','Waiting for your details');
     const resume=()=>openTask(draft,null,result.message,result.reminderRequested===true,flow);ui.activity.resume=resume;
     $('assistant-followup').append(button('Fill in the missing details',resume,'button'));
     if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){showView(draft.type==='appointment'?'appointments':'reminders');resume();}
     renderActivity();
   }
-  async function capture(text){
-    if(ui.captureBusy)return;ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
+  async function capture(text,suppliedResult=null){
+    if(ui.captureBusy)return;ui.pendingCapture=null;$('assistant-clarify-dialog').close();ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
     try{
       await paintActivity();if(refreshSavedData())renderAll();
-      const result=A.parse(text,{now:Date.now(),members:state.members,tasks:state.tasks,planningEnabled:planningProfile().enabled});response(result.message);activityStep(0,'done');
+      const result=suppliedResult||A.parse(text,clarificationOptions(text));ui.activity.assumptions=result.assumptions||[];response(result.message);activityStep(0,'done');
       if(result.kind==='answer'){ui.activity.status='done';ui.activity.title='Here is your day';ui.activity.reply='Here’s what I found in Tidy. '+result.message;ui.activity.message=result.message;activityStep(1,'done','Read your saved responsibilities');showView('today');activityStep(2,'done','Opened Today');return;}
       if(result.kind==='clarify'){waitForTaskDetails(text,result);return;}
       ui.activity.reply=result.kind==='action'?'Of course—I’m preparing a draft for you to review.':result.kind==='grocery'?'Of course—I’m checking your shopping list for “'+result.draft.title+'”.':result.draft.type==='appointment'?'Of course—I’m adding that appointment to your plan.':result.draft.remindAt!==null?'Of course—I’m setting up your reminder.':'Of course—I’m adding that to your tasks.';
@@ -519,7 +572,10 @@
       if(result.autoPlanRequested){
         const proposal=proposeLocalTask(draft);
         if(proposal.ok)Object.assign(draft,{dueDate:proposal.date,dueTime:proposal.time,remindAt:C.dueEpoch(proposal.date,proposal.time),durationMinutes:proposal.durationMinutes,planningReason:proposal.reason});
-        else planningProblem=proposal.reason;
+        else {
+          planningProblem=proposal.reason;
+          if(result.reminderRequested){waitForTaskDetails(text,{...result,kind:'clarify',autoPlanRequested:false,draft:{...draft,remindAt:null},missing:['dueDate','dueTime'],clarificationContext:{safe:true,ambiguousHour:null,clockRequested:false,autoPlanEligible:false},notice:'I couldn’t choose a suitable time: '+planningProblem,message:'I couldn’t choose a suitable time: '+planningProblem+' Choose a reminder date and time instead.'});return;}
+        }
       }
       if(result.kind==='grocery'){
         const existing=state.tasks.find(task=>task.status==='open'&&task.type==='grocery'&&task.title.toLocaleLowerCase()===draft.title.toLocaleLowerCase());
@@ -527,12 +583,12 @@
           const reminderPatch=draft.remindAt!==null?{dueDate:draft.dueDate,dueTime:draft.dueTime,remindAt:draft.remindAt}:{};
           if(existing.quantity&&draft.quantity&&existing.quantity!==draft.quantity){
             finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);ui.activity.status='waiting';ui.activity.reply='“'+existing.title+'” is already on your list with a different quantity. Please review the amount before I change it.';ui.activity.message='This item already has a different quantity. Review it before changing the amount.';ui.activity.resume=()=>openTask({...existing,...reminderPatch,quantity:draft.quantity},existing.id,ui.activity.message,draft.remindAt!==null,{text,result});response(ui.activity.message);$('assistant-followup').append(button('Review item',ui.activity.resume));renderActivity();
-          }else if(draft.remindAt!==null){const updated=C.updateTask(state,existing.id,reminderPatch),saved=save();renderAll();finishTaskActivity(updated,saved,true);}
+          }else if(draft.remindAt!==null||!existing.quantity&&draft.quantity){const updated=C.updateTask(state,existing.id,{...reminderPatch,...(!existing.quantity&&draft.quantity?{quantity:draft.quantity}:{})}),saved=save();renderAll();finishTaskActivity(updated,saved,true);}
           else finishTaskActivity(existing,!ui.saveFailed&&!ui.storageLocked,true);
           return;
         }
       }
-      const created=C.createTask(state,draft);const saved=save();renderAll();finishTaskActivity(created,saved);
+      const created=C.createTask(state,draft);const saved=save();ui.undoCapture={id:created.id,baseline:copy(created)};renderAll();finishTaskActivity(created,saved);
       if(planningProblem){ui.planResults.set(created.id,planningProblem);ui.activity.reply+=' I couldn’t choose a suitable time: '+planningProblem;ui.activity.message+=' '+planningProblem;renderActivity();}
       else if(result.flexibleTaskRequested&&!planningProfile().enabled){ui.activity.reply+=' To choose a suitable time for you, I need your usual family hours first.';ui.activity.resume=()=>showView('planning-settings');ui.activity.resumeLabel='Set up family hours';renderActivity();}
       $('assistant-followup').append(button('Edit or assign',()=>openTask(created,created.id)));
@@ -755,7 +811,14 @@
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
   $('capture-form').addEventListener('submit',event=>{event.preventDefault();void capture($('capture-text').value);});
   $('assistant-activity-open').addEventListener('click',()=>{if(ui.activity?.resume)ui.activity.resume();else revealActivityTarget(true);});
+  $('assistant-activity-edit').addEventListener('click',()=>{if(refreshSavedData())renderAll();const task=state.tasks.find(task=>task.id===ui.activity?.target?.id);if(task)openTask(task,task.id);else toast('This item is no longer in Tidy.');});
+  $('assistant-activity-undo').addEventListener('click',undoAssistantTask);
   $('assistant-activity-dismiss').addEventListener('click',()=>{if(ui.activity){ui.activity.dismissed=true;renderActivity();}});
+  $('assistant-clarify-form').addEventListener('submit',event=>{event.preventDefault();void answerQuickQuestion($('assistant-clarify-answer').value);});
+  $('assistant-clarify-details').addEventListener('click',openCaptureDetails);
+  $('assistant-clarify-cancel').addEventListener('click',()=>{cancelQuickQuestion();$('assistant-clarify-dialog').close();});
+  $('assistant-clarify-dialog').addEventListener('cancel',cancelQuickQuestion);
+  $('assistant-clarify-dialog').addEventListener('close',cancelQuickQuestion);
   for(const name of ['today-reminders','routines-reminders'])$(name).addEventListener('click',()=>showView('reminders'));
   for(const name of ['today-appointments','family-appointments'])$(name).addEventListener('click',()=>showView('appointments'));
   $('reminders-settings').addEventListener('click',showSettings);

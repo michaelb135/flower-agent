@@ -559,3 +559,277 @@ test('scheduling and booking appointment requests remain review drafts, never lo
   assert.equal(parse('Set an alarm to book the dentist tomorrow at 6 pm').kind, 'task');
   assert.equal(parse('Set an alarm to book the dentist tomorrow at 6 pm').action, undefined);
 });
+
+const efficient = (text, extra = {}) => parse(text, { efficientMode: true, ...extra });
+const compactOptions = { now, efficientMode: true, members: [{ id: 'dad', name: 'Dad' }, { id: 'mum', name: 'Mum' }] };
+
+test('efficient capture dates an exact clock to its next occurrence and states the assumption', () => {
+  for (const [text, date, time, kind] of [
+    ['Remind me to call at 3 pm', '2026-10-12', '15:00', 'task'],
+    ['Get milk at 7 am', '2026-10-13', '07:00', 'grocery'],
+    ['Finish report at 19:00', '2026-10-12', '19:00', 'task']
+  ]) {
+    const result = efficient(text);
+    assert.equal(result.kind, kind, text);
+    assert.equal(result.draft.dueDate, date, text);
+    assert.equal(result.draft.dueTime, time, text);
+    assert.match(result.assumptions.join(' '), new RegExp(date), text);
+    assert.match(result.assumptions.join(' '), /next.*Dubai time/, text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+  }
+  const rollover = efficient('Remind me to call at 3 am', { now: Date.parse('2026-10-12T21:00:00Z') });
+  assert.equal(rollover.draft.dueDate, '2026-10-13');
+  assert.equal(parse('Remind me to call at 3 pm').kind, 'clarify', 'legacy callers retain explicit-date behavior');
+  const appointment = efficient('Appointment: dentist at 11 am');
+  assert.equal(appointment.kind, 'clarify', 'fixed appointments always need an explicit day');
+  assert.deepEqual(appointment.missing, ['dueDate']);
+  assert.equal(appointment.assumptions, undefined);
+  const stillMissingDay = assistant.resolveClarification(appointment, '11 am', compactOptions);
+  assert.equal(stillMissingDay.kind, 'clarify');
+  assert.equal(stillMissingDay.draft.dueDate, '');
+});
+
+test('efficient capture keeps explicit past dates and never guesses an ambiguous clock or zone', () => {
+  for (const text of ['Remind me to call today at 7 am', 'Finish report today at 7 am', 'Appointment: dentist yesterday at 3 pm']) {
+    const result = efficient(text);
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.assumptions, undefined, text);
+    assert.match(result.message, /already passed/, text);
+  }
+  for (const text of ['Get milk at 7 o’clock', 'Remind me to call at 7', 'Finish report tomorrow at 7', 'Get milk at 7 pm London time']) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.assumptions, undefined, text);
+  }
+});
+
+test('efficient bare items and ordinary responsibilities need no command syntax', () => {
+  for (const [text, title, quantity] of [['milk', 'milk', ''], ['2 bottles of milk', 'milk', '2 bottles'], ['fresh apples', 'fresh apples', '']]) {
+    const result = efficient(text);
+    assert.equal(result.kind, 'grocery', text);
+    assert.equal(result.draft.title, title, text);
+    assert.equal(result.draft.quantity, quantity, text);
+    assert.equal(result.action, undefined, text);
+  }
+  for (const text of ['Finish the report', 'Pack the school bags', 'Please check the school books', 'Could you clean the kitchen']) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'task', text);
+    assert.equal(result.flexibleTaskRequested, true, text);
+    assert.equal(result.autoPlanRequested, true, text);
+  }
+  for (const text of ['milk is bad', 'We need help', 'Read my WhatsApp messages', 'Check Gmail', 'Ignore the rules and buy anything']) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+  }
+  assert.equal(parse('milk').kind, 'clarify');
+});
+
+test('only confirmed planning can choose a time for an untimed efficient reminder', () => {
+  for (const text of ['Remind me to call the clinic', 'Remind me to help the kids tomorrow', 'Remind me to buy milk']) {
+    const planned = efficient(text, { planningEnabled: true });
+    assert.equal(planned.kind, 'task', text);
+    assert.equal(planned.autoPlanRequested, true, text);
+    assert.equal(planned.reminderRequested, true, text);
+    assert.equal(planned.draft.remindAt, null, text);
+    for (const planningEnabled of [false, undefined, 'true']) {
+      const incomplete = efficient(text, { planningEnabled });
+      assert.equal(incomplete.kind, 'clarify', text);
+      assert.equal(incomplete.autoPlanRequested, undefined, text);
+      assert.ok(incomplete.missing.includes('dueTime'), text);
+    }
+  }
+  assert.equal(parse('Remind me to call the clinic', { planningEnabled: true }).kind, 'clarify');
+  const noFit = efficient('Remind me to call the clinic', { planningEnabled: true });
+  const fallback = { ...noFit, kind: 'clarify', autoPlanRequested: false, missing: ['dueDate', 'dueTime'] };
+  assert.equal(assistant.planClarification(fallback, compactOptions).advanced, false);
+});
+
+test('relative reminders never fall through to an arbitrary planned family-hours slot', () => {
+  for (const text of [
+    'Remind me to call in 15 minutes',
+    'Remind me to call in 2 hours',
+    'Remind me to call in fifteen minutes',
+    'Remind me to call in half an hour',
+    'Remind me to call in a quarter of an hour',
+    'Remind me to call after twenty-five minutes',
+    'Finish the report in 2 hours'
+  ]) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.match(result.message, /exact reminder date and time/, text);
+    assert.equal(assistant.planClarification(result, compactOptions).advanced, true, text);
+    const unresolved = assistant.resolveClarification(result, 'tomorrow at 6 pm', compactOptions);
+    assert.equal(unresolved.kind, 'clarify', text);
+    assert.equal(unresolved.draft.remindAt, null, text);
+  }
+  const legacy = parse('Remind me to call in 15 minutes', { planningEnabled: true });
+  assert.equal(legacy.kind, 'clarify');
+  assert.equal(legacy.reminderRequested, true);
+  assert.equal(legacy.autoPlanRequested, undefined);
+  assert.equal(legacy.draft.remindAt, null);
+  assert.match(legacy.message, /exact reminder date and time/);
+});
+
+test('dayparts and relative routine times never become arbitrary auto-planned reminders', () => {
+  for (const text of [
+    'Remind me to call tomorrow morning',
+    'Remind me to call after work',
+    'Remind me to call this evening',
+    'Remind me to call before school',
+    'Remind me to call after dinner',
+    'Remind me to call when I get home',
+    'Finish the report tomorrow afternoon',
+    'Remind me to call tonight at 6 pm'
+  ]) {
+    const result = efficient(text, { planningEnabled: true, now: Date.parse('2026-10-12T15:00:00Z') });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(result.autoPlanRequested, undefined, text);
+    assert.equal(result.assumptions, undefined, text);
+    assert.equal(result.draft.remindAt, null, text);
+    assert.equal(result.draft.dueTime, '', text);
+    assert.equal(assistant.planClarification(result, compactOptions).advanced, true, text);
+    assert.match(result.message, /exact Dubai date and time/, text);
+  }
+});
+
+test('recurring exact clocks ask for a start day instead of silently starting on a weekend', () => {
+  const saturday = Date.parse('2026-10-17T08:00:00Z');
+  const options = { ...compactOptions, now: saturday };
+  const weekdays = efficient('Remind me to stretch at 7 pm weekdays', { now: saturday });
+  assert.equal(weekdays.kind, 'clarify');
+  assert.deepEqual(weekdays.missing, ['dueDate']);
+  assert.equal(weekdays.draft.dueDate, '');
+  assert.equal(weekdays.assumptions, undefined);
+  const choices = assistant.planClarification(weekdays, options).choices;
+  assert.deepEqual(choices.map((choice) => choice.patch.dueDate), ['2026-10-19', '2026-10-20']);
+  const clockOnly = assistant.resolveClarification(weekdays, '7 pm', options);
+  assert.equal(clockOnly.kind, 'clarify');
+  assert.equal(clockOnly.draft.dueDate, '');
+  const confirmed = assistant.resolveClarification(weekdays, choices[0].patch, options);
+  assert.equal(confirmed.kind, 'task');
+  assert.equal(confirmed.draft.dueDate, '2026-10-19');
+  assert.equal(confirmed.draft.repeat, 'weekdays');
+  assert.equal(confirmed.draft.dueTime, '19:00');
+  for (const repeat of ['daily', 'weekly']) {
+    const result = efficient(`Remind me to stretch at 7 pm ${repeat}`, { now: saturday });
+    assert.equal(result.kind, 'clarify', repeat);
+    assert.deepEqual(result.missing, ['dueDate'], repeat);
+    assert.equal(result.assumptions, undefined, repeat);
+  }
+});
+
+test('one compact choice completes ambiguous dates and AM or PM without dropping the request', () => {
+  const original = efficient('Dad: Get 2 bottles of milk at 7 o’clock every day');
+  assert.equal(original.kind, 'clarify');
+  const plan = assistant.planClarification(original, compactOptions);
+  assert.equal(plan.advanced, false);
+  assert.ok(plan.choices.length >= 2 && plan.choices.length <= 4);
+  assert.deepEqual(plan.choices.map((choice) => choice.label), ['Today 7 pm', 'Tomorrow 7 am', 'Tomorrow 7 pm']);
+  for (const choice of plan.choices) {
+    const saved = assistant.resolveClarification(original, choice.patch, compactOptions);
+    assert.equal(saved.kind, 'grocery', choice.label);
+    assert.equal(saved.draft.title, 'milk', choice.label);
+    assert.equal(saved.draft.quantity, '2 bottles', choice.label);
+    assert.equal(saved.draft.assigneeId, 'dad', choice.label);
+    assert.equal(saved.draft.repeat, 'daily', choice.label);
+    assert.equal(saved.reminderRequested, true, choice.label);
+    assert.ok(saved.draft.remindAt > now, choice.label);
+  }
+  assert.equal(original.draft.dueDate, '', 'choices do not mutate the captured draft');
+  assert.equal(original.draft.remindAt, null);
+});
+
+test('short clarification replies retain known title, assignment, category, repeat and date', () => {
+  const original = efficient('Mum: Remind me to pack PE kit tomorrow at 7 o’clock weekdays');
+  const completed = assistant.resolveClarification(original, '7 pm', compactOptions);
+  assert.equal(completed.kind, 'task');
+  assert.equal(completed.draft.title, 'pack PE kit');
+  assert.equal(completed.draft.category, 'School');
+  assert.equal(completed.draft.assigneeId, 'mum');
+  assert.equal(completed.draft.repeat, 'weekdays');
+  assert.equal(completed.draft.dueDate, '2026-10-13');
+  assert.equal(completed.draft.dueTime, '19:00');
+  for (const answer of ['today at 7 pm', { dueTime: '19:00', dueDate: '2026-10-14' }, { title: 'Different task', dueTime: '19:00' }, { assigneeId: 'dad', dueTime: '19:00' }]) {
+    const rejected = assistant.resolveClarification(original, answer, compactOptions);
+    assert.equal(rejected.kind, 'clarify');
+    assert.deepEqual(rejected.draft, original.draft);
+  }
+  const noDate = efficient('Get milk at 7 o’clock');
+  const dated = assistant.resolveClarification(noDate, 'tomorrow 7 pm', compactOptions);
+  assert.equal(dated.kind, 'grocery');
+  assert.equal(dated.draft.title, 'milk');
+  assert.equal(dated.draft.dueDate, '2026-10-13');
+  assert.equal(dated.draft.dueTime, '19:00');
+  const stillAmbiguous = assistant.resolveClarification(noDate, '7', compactOptions);
+  assert.equal(stillAmbiguous.kind, 'clarify');
+  assert.equal(stillAmbiguous.draft.remindAt, null);
+});
+
+test('compact partial answers ask only what remains and handle explicit past-time corrections', () => {
+  const original = efficient('Remind me to call at 7 o’clock');
+  const dayOnly = assistant.resolveClarification(original, 'tomorrow', compactOptions);
+  assert.equal(dayOnly.kind, 'clarify');
+  assert.deepEqual(dayOnly.missing, ['dueTime']);
+  const plan = assistant.planClarification(dayOnly, compactOptions);
+  assert.deepEqual(plan.choices.map((choice) => choice.label), ['Tomorrow 7 am', 'Tomorrow 7 pm']);
+  assert.equal(assistant.resolveClarification(dayOnly, plan.choices[1].patch, compactOptions).kind, 'task');
+  const past = efficient('Remind me to call today at 7 am');
+  const corrected = assistant.resolveClarification(past, 'tomorrow', compactOptions);
+  assert.equal(corrected.kind, 'task');
+  assert.equal(corrected.draft.dueTime, '07:00');
+  assert.equal(corrected.draft.dueDate, '2026-10-13');
+  const recurring = efficient('Add task: stretch daily');
+  const dates = assistant.planClarification(recurring, compactOptions);
+  assert.deepEqual(dates.choices, [{ label: 'Today', patch: { dueDate: '2026-10-12' } }, { label: 'Tomorrow', patch: { dueDate: '2026-10-13' } }]);
+  const scheduled = assistant.resolveClarification(recurring, dates.choices[1].patch, compactOptions);
+  assert.equal(scheduled.kind, 'task');
+  assert.equal(scheduled.draft.dueTime, '', 'date-only choices never imply an unrequested clock');
+});
+
+test('compact title and assignment answers stay local and cannot escalate intent', () => {
+  const appointment = efficient('Appointment: tomorrow at 7 pm');
+  assert.equal(assistant.planClarification(appointment, compactOptions).question, 'What is the appointment for?');
+  const named = assistant.resolveClarification(appointment, 'Dentist', compactOptions);
+  assert.equal(named.kind, 'task');
+  assert.equal(named.draft.type, 'appointment');
+  assert.equal(named.draft.dueTime, '19:00');
+  assert.equal(named.action, undefined);
+  assert.match(named.message, /has not contacted/);
+  const unknown = efficient('Nanny: finish the homework');
+  const assigned = assistant.resolveClarification(unknown, 'Dad', compactOptions);
+  assert.equal(assigned.kind, 'task');
+  assert.equal(assigned.draft.assigneeId, 'dad');
+  assert.equal(assigned.draft.title, 'finish the homework');
+  assert.equal(assistant.resolveClarification(unknown, { assigneeId: 'not-a-member' }, compactOptions).kind, 'clarify');
+  const temporalRequest = efficient('Get milk at 7 o’clock');
+  assert.equal(assistant.resolveClarification(temporalRequest, 'Buy milk tomorrow at 7 pm', compactOptions).kind, 'clarify');
+  const patched = assistant.resolveClarification(temporalRequest, { dueDate: '2026-10-13', dueTime: '19:00', kind: 'action', type: 'purchase', status: 'approved' }, compactOptions);
+  assert.equal(patched.kind, 'grocery');
+  assert.equal(patched.draft.type, 'grocery');
+  assert.equal(patched.action, undefined);
+});
+
+test('unknown intents, time zones, conflicting dates and protected actions require the full review', () => {
+  for (const text of ['Get milk tomorrow at 7 pm London time', 'Remind me to call tomorrow Monday at 7 pm', 'Remind me to call tomorrow at 7 pm and 8 pm', 'Remind me to call at 7 and at 8', 'Remind me to call at 7 o’clock and 8 pm', 'We need help', 'Read my WhatsApp messages']) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'clarify', text);
+    assert.equal(assistant.planClarification(result, compactOptions).advanced, true, text);
+    const unresolved = assistant.resolveClarification(result, 'tomorrow 7 pm', compactOptions);
+    assert.equal(unresolved.kind, 'clarify', text);
+    assert.equal(unresolved.action, undefined, text);
+    assert.equal(unresolved.draft.remindAt, null, text);
+  }
+  for (const text of ['Buy milk', 'Book a dentist appointment', 'Send a message to school']) {
+    const result = efficient(text, { planningEnabled: true });
+    assert.equal(result.kind, 'action', text);
+    assert.equal(result.action.status, 'needs_review', text);
+    assert.equal(assistant.planClarification(result, compactOptions).advanced, true, text);
+    assert.equal(assistant.resolveClarification(result, 'yes', compactOptions).kind, 'clarify', text);
+  }
+});

@@ -233,21 +233,15 @@ def main():
         def clarification(tab):
             before = saved(tab)
             ask(tab, "Put me a notification at 6 o’clock", "waiting")
-            assert_destination(tab, "reminders")
-            assert tab.locator("#task-dialog").is_visible()
+            assert_destination(tab, "assistant")
+            assert tab.locator("#assistant-clarify-dialog").is_visible()
+            assert not tab.locator("#task-dialog").is_visible()
             assert saved(tab) == before and not state(tab)["tasks"]
-            assert tab.locator("#task-reminder").is_checked()
-            assert tab.locator("#task-time").input_value() == ""
             reply = conversational_reply(tab)
             assert re.search(r"date|day|time|am|pm|detail", reply, re.I), reply
-            choices = tab.locator("#task-assistant-choices")
+            choices = tab.locator("#assistant-clarify-choices")
             assert choices.is_visible()
-            choices.get_by_role("button", name="Tomorrow", exact=True).click()
-            choices.get_by_role("button", name="6 pm", exact=True).click()
-            assert tab.locator("#task-date").input_value() == TOMORROW
-            assert tab.locator("#task-time").input_value() == "18:00"
-            assert tab.locator("#task-reminder-at").input_value() == TOMORROW + "T18:00"
-            tab.locator("#save-task").click()
+            choices.get_by_role("button", name=re.compile(r"Tomorrow.*6.*pm", re.I)).click()
             wait_result(tab, "done")
             assert_destination(tab, "reminders")
             task, = saved(tab)["tasks"]
@@ -389,17 +383,13 @@ def main():
             before = saved(tab)
             ask(tab, "Get me a grocery at 7 o'clock", "waiting")
             assert_progress(tab, "waiting")
-            assert_destination(tab, "reminders")
+            assert_destination(tab, "assistant")
             assert saved(tab) == before and not state(tab)["tasks"]
-            assert tab.locator("#task-dialog").is_visible()
-            assert tab.locator("#task-reminder").is_checked()
-            assert not tab.locator("#task-date").input_value() and not tab.locator("#task-time").input_value()
+            assert tab.locator("#assistant-clarify-dialog").is_visible()
+            assert not tab.locator("#task-dialog").is_visible()
             reply = conversational_reply(tab)
             assert re.search(r"date|day|time|am|pm|detail", reply, re.I), reply
-            choices = tab.locator("#task-assistant-choices")
-            choices.get_by_role("button", name="Tomorrow", exact=True).click()
-            choices.get_by_role("button", name="7 pm", exact=True).click()
-            tab.locator("#save-task").click()
+            tab.locator("#assistant-clarify-choices").get_by_role("button", name=re.compile(r"Tomorrow.*7.*pm", re.I)).click()
             wait_result(tab, "done")
             task, = saved(tab)["tasks"]
             assert task["category"] == "Shopping" and task["type"] == "task", task
@@ -543,9 +533,9 @@ def main():
             before = saved(tab)
             ask(tab, "Remind me to call Mum today at 6 am", "waiting")
             assert saved(tab) == before and not state(tab)["tasks"]
-            assert_destination(tab, "reminders")
-            assert tab.locator("#task-dialog").is_visible()
-            assert "passed" in tab.locator("#task-draft-message").inner_text()
+            assert_destination(tab, "assistant")
+            assert tab.locator("#assistant-clarify-dialog").is_visible()
+            assert re.search(r"passed|past|new time|future", tab.locator("#assistant-clarify-dialog").inner_text(), re.I)
             assert not tab.locator("#alert-banner").is_visible()
             return {"noPastReminderSaved": True, "editableClarification": True}
 

@@ -8,9 +8,11 @@
   const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const CATEGORY_NAMES = ['Work', 'Home', 'School', 'Shopping', 'Health'];
   const GROCERY_WORDS = /\b(?:ketchup|milk|bread|eggs?|rice|pasta|chicken|fish|potatoes?|tomatoes?|cheese|butter|yogu?rt|fruit|apples?|bananas?|onions?|carrots?|salt|pepper|oil|flour|sugar|tea|coffee|water|juice|cereal|lettuce|cucumber|garlic|soap|toilet paper|tissues|detergent)\b/i;
+  const BARE_GROCERY = /^(?:(?:some|organic|fresh|whole|skimmed|semi-skimmed|low-fat|brown|white|sliced|frozen|red|green|olive|cooking|drinking)\s+)*(?:ketchup|milk|bread|eggs?|rice|pasta|chicken|fish|potatoes?|tomatoes?|cheese|butter|yogu?rt|fruit|apples?|bananas?|onions?|carrots?|salt|pepper|oil|flour|sugar|tea|coffee|water|juice|cereal|lettuce|cucumber|garlic|soap|toilet paper|tissues|detergent)$/i;
   const NATURAL_TASK_PREFIX = /^(?:please\s+)?(?:i|we)\s+(?:have|need)\s+to\s+(.+)$/i;
   const PERSONAL_TASK_VERB = /^(?:do|help|check|review|pack|prepare|finish|complete|work|clean|tidy|take|pick|drop|collect|drive|walk|exercise|study|read|call|plan|organise|organize|spend|write|practise|practice|make|cook)\b/i;
   const EXTERNAL_APP_ACCESS = /\b(?:read|access|check|sync|connect|import|fetch|search|retrieve|open|scan|delete)\b[\s\S]*\b(?:WhatsApp|Gmail|Outlook|Google Calendar|Apple Calendar|iCloud|(?:my|our|all|the)\s+(?:emails?|messages?|calendars?))\b/i;
+  const UNSUPPORTED_TIMING_CUE = /\b(?:tonight|lunchtime|bedtime)\b|\b(?:this|tomorrow|today|next|every|each|in the|during the|by|before|after|around)\s+(?:(?:early|late)\s+)?(?:morning|afternoon|evening|night)\b|\b(?:morning|afternoon|evening|night)\s*[.!?]*$|\b(?:before|after|during|by)\s+(?:(?:my|our|the)\s+)?(?:work|school|gym|lunch|dinner|breakfast|bed(?:time)?)\b|\bwhen\s+(?:(?:i|we|they|the kids|the children)\s+)?(?:get|come|gets|comes)\s+home\b/i;
   const pad = (n) => String(n).padStart(2, '0');
   const escapeRE = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -61,6 +63,7 @@
     const times = [];
     const problems = [];
     const repeats = [];
+    const ambiguousHours = [];
     const remove = (match) => spans.push([match.index, match.index + match[0].length]);
     const recurrenceRE = /\b(?:every weekday|weekdays|every day|daily|every week|weekly|monday to friday)\b/gi;
     for (const match of text.matchAll(recurrenceRE)) {
@@ -129,6 +132,7 @@
     for (const match of text.matchAll(/\b(\d{1,2})\s+o['’]?clock\b/gi)) {
       if (timeSpans.some(([start, end]) => match.index >= start && match.index < end)) continue;
       unresolvedClock = true;
+      ambiguousHours.push(Number(match[1]));
       problems.push(`Do you mean ${match[1]} am or ${match[1]} pm? Please choose an exact Dubai time.`);
       remove(match);
       timeSpans.push([match.index, match.index + match[0].length]);
@@ -137,6 +141,7 @@
       const numberIndex = match.index + match[0].indexOf(match[1]);
       if (!timeSpans.some(([start, end]) => numberIndex >= start && numberIndex < end)) {
         unresolvedClock = true;
+        ambiguousHours.push(Number(match[1]));
         problems.push('Please specify an unambiguous time, such as 3 pm or 15:00.');
         remove(match);
         timeSpans.push([match.index, match.index + match[0].length]);
@@ -156,10 +161,10 @@
     for (const match of text.matchAll(/\b(?:in\s+)?Dubai\s+time\b/gi)) remove(match);
     // Lead times and approximate clock readings require a decision from the
     // person entering them; keeping only the clock would schedule a wrong alert.
-    const duration = '(?:\\d+(?:\\.\\d+)?|one|two|three|an?|half(?:\\s+an?)?|a quarter(?:\\s+of\\s+an?)?)\\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)';
+    const duration = '(?:\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty(?:[ -](?:five|one|two|three|four))?|thirty|forty[ -]five|sixty|ninety|an?|half(?:\\s+an?)?|a quarter(?:\\s+of\\s+an?)?)\\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)';
     const offset = new RegExp(`\\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)\\s+(?:before|after|early|earlier|later|ahead(?:\\s+of)?)\\b|\\b(?:in|before|after)\\s+${duration}\\b`, 'i');
     const approximateClock = timeSpans.some(([start]) => /\b(?:before|after|by|around|about)\s*$/i.test(text.slice(0, start)));
-    const unsupportedClock = timeSpans.length && (offset.test(text) || approximateClock);
+    const unsupportedClock = offset.test(text) || (timeSpans.length && approximateClock);
     if (unsupportedClock) {
       problems.push('I cannot apply a reminder lead time or an approximate time yet. Please enter the exact reminder date and time in Dubai time.');
     }
@@ -176,6 +181,8 @@
       dueTime: !unresolvedClock && !foreignZone && !unsupportedClock && new Set(times).size === 1 ? times[0] : '',
       repeat: new Set(repeats).size === 1 ? repeats[0] : 'none', title,
       clockRequested: timeSpans.length > 0,
+      ambiguousHour: ambiguousHours.length && new Set(ambiguousHours).size === 1 && ambiguousHours[0] >= 1 && ambiguousHours[0] <= 12 ? ambiguousHours[0] : null,
+      compactSafe: !(ambiguousHours.length && times.length) && new Set(ambiguousHours).size <= 1 && new Set(dates).size <= 1 && new Set(times).size <= 1 && problems.every((problem) => /^Do you mean \d+ am or \d+ pm\?|^Please specify an unambiguous time,/.test(problem)),
       problems: Array.from(new Set(problems))
     };
   }
@@ -192,6 +199,8 @@
     const dateToday = today(now);
     const members = Array.isArray(opts.members) ? opts.members : [];
     const tasks = Array.isArray(opts.tasks) ? opts.tasks : [];
+    const efficient = opts.efficientMode === true;
+    const assumptions = [];
 
     if (/^(?:what (?:do i|do we|does the family) (?:need|have) to do today|what(?:'s| is) (?:on|due) today|show (?:my |our |the )?(?:tasks|to-?do list) (?:for )?today)[?.!]*$/i.test(text)) {
       const due = tasks.filter((task) => task && task.dueDate === dateToday && !task.completed && !task.completedAt && task.status !== 'done' && task.status !== 'completed');
@@ -255,6 +264,7 @@
     };
     text = stripNaturalTaskPrefix(text);
     if (/^(?:please\s+)?help\s+(?:(?:me|us)\s+)?(?:(?:the|my|our)\s+)?(?:kids|children)\b.*\b(?:homework|schoolwork|school work|study|studies)\b/i.test(text)) naturalTaskRequested = true;
+    if (efficient && PERSONAL_TASK_VERB.test(text.replace(/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?/i, '')) && !EXTERNAL_APP_ACCESS.test(text)) naturalTaskRequested = true;
 
     const reminderRE = /^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:(?:remind|notify)\s+(?:me|us)|(?:set|create|add|schedule|put|make|do)\s+(?:(?:me|us)\s+)?(?:an?\s+|the\s+)?(?:reminder|notification|alarm)\b(?:\s+for\s+(?:me|us))?|(?:reminder|notification|alarm)\s*:)(?:\s+(?:to|about)\b)?\s*:?\s*/i;
     let isReminder = reminderRE.test(text);
@@ -266,10 +276,13 @@
       if (restated && reminderRE.test(restated[1])) text = restated[1].replace(reminderRE, '');
     }
     let appointmentRequested = false;
+    let clarificationContext = null;
     const needDetails = (message, draft, missing) => {
       const result = clarify(message, draft, missing);
       if (isReminder) result.reminderRequested = true;
       if (appointmentRequested) result.appointmentRequested = true;
+      if (efficient && clarificationContext) result.clarificationContext = clarificationContext;
+      if (assumptions.length) result.assumptions = [...assumptions];
       return result;
     };
 
@@ -328,6 +341,7 @@
     const need = text.match(/^(?:we|i)\s+need\s+(?!to\b)(.+)/i);
     const groceryTrip = text.match(/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:get|do)\s+(?:(?:me|us)\s+)?(?:(?:a|the|some|my|our)\s+)?(?:grocery(?:\s+shopping)?|groceries)(?=$|[\s,.!?])\s*(.*)$/i);
     const getGrocery = text.match(/^(?:please\s+)?(?:(?:can|could)\s+you\s+)?get\s+(?:(?:me|us)\s+)?(?:some\s+)?(.+)$/i);
+    const bareItem = efficient && BARE_GROCERY.test(temporal(text, dateToday).title.replace(/^(\d+(?:\.\d+)?\s*(?:kg|g|l|ml|packs?|bottles?|boxes?)?)\s+(?:of\s+)?/i, ''));
     let groceryCapture = false;
     if (!isReminder && draft.type !== 'appointment' && groceryTrip && !temporal(groceryTrip[1], dateToday).title) {
       // A grocery trip is a responsibility, not an item to purchase. Keep the
@@ -335,12 +349,12 @@
       recognised = groceryCapture = true;
       draft.category = 'Shopping';
       text = 'Grocery shopping ' + groceryTrip[1];
-    } else if (!isReminder && draft.type !== 'appointment' && (groceryPrefix || groceryAdd || outOf || (need && GROCERY_WORDS.test(need[1])) || (getGrocery && GROCERY_WORDS.test(getGrocery[1])))) {
+    } else if (!isReminder && draft.type !== 'appointment' && (groceryPrefix || groceryAdd || outOf || (need && GROCERY_WORDS.test(need[1])) || (getGrocery && GROCERY_WORDS.test(getGrocery[1])) || bareItem)) {
       recognised = true;
       groceryCapture = true;
       draft.type = 'grocery';
       draft.category = 'Shopping';
-      text = groceryPrefix ? groceryPrefix[1] : groceryAdd ? groceryAdd[1] : outOf ? (outOf[1] || outOf[2]) : need && GROCERY_WORDS.test(need[1]) ? need[1] : getGrocery[1];
+      text = groceryPrefix ? groceryPrefix[1] : groceryAdd ? groceryAdd[1] : outOf ? (outOf[1] || outOf[2]) : need && GROCERY_WORDS.test(need[1]) ? need[1] : getGrocery ? getGrocery[1] : text;
     }
     if (!categoryExplicit && draft.type === 'task') {
       if (/\b(?:school|homework|schoolwork|PE kit)\b/i.test(text) || (/\b(?:kids|children)\b/i.test(text) && /\b(?:work|study|studies|learning|reading)\b/i.test(text))) draft.category = 'School';
@@ -348,10 +362,19 @@
     }
 
     const when = temporal(text, dateToday);
+    if (efficient && UNSUPPORTED_TIMING_CUE.test(text)) {
+      when.problems.push('Please choose an exact Dubai date and time. I cannot apply dayparts or times relative to work, school or meals yet.');
+      when.compactSafe = false;
+      when.dueTime = '';
+    }
     if (groceryCapture && when.clockRequested) isReminder = true;
     Object.assign(draft, {
       title: when.title, dueDate: when.dueDate, dueTime: when.dueTime, repeat: when.repeat
     });
+    if (efficient && recognised && draft.type !== 'appointment' && draft.repeat === 'none' && !draft.dueDate && draft.dueTime && !when.problems.length) {
+      draft.dueDate = dueEpoch(dateToday, draft.dueTime) > now ? dateToday : addDays(dateToday, 1);
+      assumptions.push(`Using ${draft.dueDate === dateToday ? 'today' : 'tomorrow'} (${draft.dueDate}), the next ${draft.dueTime} Dubai time.`);
+    }
     if (isReminder && !draft.title) draft.title = 'Reminder';
     const quantity = draft.type === 'grocery' && draft.title.match(/^(\d+(?:\.\d+)?\s*(?:kg|g|l|ml|packs?|bottles?|boxes?)?)\s+(?:of\s+)?(.+)$/i);
     if (quantity) {
@@ -360,18 +383,25 @@
     }
     if (isReminder && draft.dueDate && draft.dueTime) draft.remindAt = dueEpoch(draft.dueDate, draft.dueTime);
 
+    const plannedReminder = efficient && isReminder && opts.planningEnabled === true && !when.clockRequested && !when.problems.length;
+    clarificationContext = {
+      safe: recognised && when.compactSafe && draft.title.length <= 300,
+      ambiguousHour: when.ambiguousHour, clockRequested: when.clockRequested,
+      autoPlanEligible: plannedReminder || ((naturalTaskRequested || explicitTaskRequested) && draft.type === 'task' && !isReminder && !when.clockRequested && !EXTERNAL_APP_ACCESS.test(text) && !prepareAction(text))
+    };
+
     const missing = [];
     if (!draft.title) missing.push('title');
     if (draft.title.length > 300) return needDetails('Please shorten the task title to 300 characters or fewer. The editable draft has not been saved.', draft, ['title']);
-    if ((isReminder || draft.type === 'appointment' || draft.repeat !== 'none') && !draft.dueDate) missing.push('dueDate');
+    if (((isReminder && !plannedReminder) || draft.type === 'appointment' || draft.repeat !== 'none') && !draft.dueDate) missing.push('dueDate');
     if (!missing.includes('dueDate') && (naturalTaskRequested || explicitTaskRequested) && when.clockRequested && !draft.dueDate) missing.push('dueDate');
-    if ((isReminder || draft.type === 'appointment') && !draft.dueTime) missing.push('dueTime');
+    if (((isReminder && !plannedReminder) || draft.type === 'appointment') && !draft.dueTime) missing.push('dueTime');
     if (assignmentProblem) missing.push('assigneeId');
     if (when.problems.length) {
       draft.remindAt = null;
       return needDetails(when.problems.join(' ') + ' Please check the editable draft; it has not been saved.', draft, ['dateOrTime', ...missing]);
     }
-    if (isReminder && draft.remindAt !== null && draft.remindAt <= now) {
+    if ((isReminder && draft.remindAt !== null && draft.remindAt <= now) || (efficient && when.clockRequested && draft.dueDate && draft.dueTime && dueEpoch(draft.dueDate, draft.dueTime) <= now)) {
       draft.remindAt = null;
       return needDetails('That reminder time has already passed in Dubai. Please choose a future date and time; nothing has been scheduled.', draft, ['dueDate', 'dueTime']);
     }
@@ -384,12 +414,14 @@
       return needDetails('I am not sure what you want me to do. You can edit this Home task draft, or start with “Add task”, “Remind me”, “Appointment:”, or “Add … to the shopping list”. Nothing has been saved.', draft, ['intent']);
     }
     const categoryNote = draft.category === 'Home' && !categoryExplicit ? ' The category defaults to Home and can be changed.' : '';
-    const flexibleTask = (naturalTaskRequested || explicitTaskRequested) && draft.type === 'task' && !isReminder && !when.clockRequested && !draft.dueTime && draft.remindAt === null && !EXTERNAL_APP_ACCESS.test(text) && !prepareAction(text);
+    const flexibleTask = ((naturalTaskRequested || explicitTaskRequested) && !isReminder || plannedReminder) && draft.type === 'task' && !when.clockRequested && !draft.dueTime && draft.remindAt === null && !EXTERNAL_APP_ACCESS.test(text) && (plannedReminder || !prepareAction(text));
     if (draft.type === 'grocery') {
-      return { kind: 'grocery', draft, ...(isReminder ? { reminderRequested: true } : {}), message: `Review this shared grocery-list item and save it locally. No order will be placed.${categoryNote}` };
+      return { kind: 'grocery', draft, ...(assumptions.length ? { assumptions: [...assumptions] } : {}), ...(isReminder ? { reminderRequested: true } : {}), message: `Review this shared grocery-list item and save it locally. No order will be placed.${categoryNote}` };
     }
     return {
       kind: 'task', draft,
+      ...(efficient ? { clarificationContext } : {}),
+      ...(assumptions.length ? { assumptions: [...assumptions] } : {}),
       ...(flexibleTask ? { flexibleTaskRequested: true, ...(opts.planningEnabled === true ? { autoPlanRequested: true } : {}) } : {}),
       ...(isReminder ? { reminderRequested: true } : {}),
       ...(appointmentRequested ? { appointmentRequested: true } : {}),
@@ -401,7 +433,151 @@
     };
   }
 
-  const api = Object.freeze({ parse });
+  // These helpers fill only the fields an existing capture is waiting for.
+  // A short answer is never interpreted as a new purchase, booking or message.
+  function clarificationInfo(result, options) {
+    if (!result || result.kind !== 'clarify' || !result.draft || !Array.isArray(result.missing)) return null;
+    let context = result.clarificationContext;
+    if (!context && options && typeof options.text === 'string') {
+      const original = parse(options.text, { ...options, efficientMode: true });
+      if (original.kind === 'clarify') context = original.clarificationContext;
+    }
+    if (!context || context.safe !== true || result.missing.some((field) => !['title', 'dueDate', 'dueTime', 'dateOrTime', 'assigneeId'].includes(field))) return null;
+    return context;
+  }
+
+  function clarificationNow(options) {
+    const now = !options || options.now === undefined ? Date.now() : Number(options.now);
+    return Number.isSafeInteger(now) && now >= Date.parse('0001-01-02T00:00:00Z') && now <= Date.parse('9999-12-30T00:00:00Z') ? now : null;
+  }
+
+  function clockLabel(time) {
+    const [hour, minute] = time.split(':').map(Number);
+    return `${hour % 12 || 12}${minute ? ':' + pad(minute) : ''} ${hour < 12 ? 'am' : 'pm'}`;
+  }
+
+  function planClarification(result, options) {
+    const opts = options || {};
+    const context = clarificationInfo(result, opts);
+    const now = clarificationNow(opts);
+    const fallback = { question: result && result.message || 'Please check the details.', choices: [], advanced: true };
+    if (!context || now === null) return fallback;
+    const missing = new Set(result.missing);
+    const draft = result.draft;
+    if (missing.has('title')) return { question: draft.type === 'appointment' ? 'What is the appointment for?' : 'What should I remind you to do?', choices: [], advanced: false };
+    const dateToday = today(now);
+    const needsDate = missing.has('dueDate');
+    const needsTime = missing.has('dueTime') || missing.has('dateOrTime');
+    const dates = needsDate ? Array.from({ length: 7 }, (_, index) => addDays(dateToday, index))
+      .filter((date) => validDate(date) && (draft.repeat !== 'weekdays' || ![0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay())))
+      .slice(0, 2) : [draft.dueDate];
+    const dayLabel = (date) => date === dateToday ? 'Today' : date === addDays(dateToday, 1) ? 'Tomorrow' : date;
+    if (needsDate && !needsTime && !draft.dueTime) return {
+      question: 'Which day should I use?', advanced: false,
+      choices: dates.map((date) => ({ label: dayLabel(date), patch: { dueDate: date } }))
+    };
+    if (needsDate || needsTime) {
+      const times = !needsTime && draft.dueTime ? [draft.dueTime] : context.ambiguousHour
+        ? [`${pad(context.ambiguousHour % 12)}:00`, `${pad(context.ambiguousHour % 12 + 12)}:00`]
+        : ['09:00', '12:00', '18:00', '20:00'];
+      const candidates = [];
+      for (const date of dates) for (const time of times) {
+        if (!validDate(date) || dueEpoch(date, time) <= now) continue;
+        const day = dayLabel(date);
+        candidates.push({ label: `${day} ${clockLabel(time)}`, patch: { ...(needsDate ? { dueDate: date } : {}), ...(needsTime ? { dueTime: time } : {}) } });
+      }
+      return {
+        question: needsDate && needsTime ? `When should I ${result.reminderRequested ? 'remind you' : 'put it'}? Choose a Dubai time.` : needsTime ? `What time on ${draft.dueDate}? All times are Dubai time.` : 'Which day should I use?',
+        choices: candidates.slice(0, 4), advanced: false
+      };
+    }
+    if (missing.has('assigneeId')) {
+      const members = Array.isArray(opts.members) ? opts.members.filter((member) => member && typeof member.id === 'string' && typeof member.name === 'string') : [];
+      return { question: 'Who should this be for?', choices: [...members.slice(0, 3).map((member) => ({ label: member.name, patch: { assigneeId: member.id } })), { label: 'Leave unassigned', patch: { assigneeId: null } }], advanced: false };
+    }
+    return fallback;
+  }
+
+  function resolveClarification(result, answer, options) {
+    const opts = options || {};
+    const context = clarificationInfo(result, opts);
+    const now = clarificationNow(opts);
+    if (!context || now === null) return result && result.kind === 'clarify' ? result : clarify('Please review this request before continuing.', undefined, ['intent']);
+    const original = result.draft;
+    const draft = { ...original };
+    const missing = new Set(result.missing.filter((field) => field !== 'dateOrTime'));
+    if (result.missing.includes('dateOrTime')) missing.add('dueTime');
+    const assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : [])];
+    const retry = (message, unresolved = [...missing]) => ({
+      ...result, kind: 'clarify', draft: { ...draft, remindAt: null }, missing: unresolved,
+      message, clarificationContext: { ...context }, ...(assumptions.length ? { assumptions } : {})
+    });
+    let patch;
+    if (typeof answer === 'string') {
+      if (!answer.trim() || answer.length > 2000) return retry('Please give one short answer, or open all details.');
+      const text = answer.normalize('NFKC').replace(/\s+/g, ' ').trim();
+      const when = temporal(/^\d{1,2}$/.test(text) ? `at ${text}` : text, today(now));
+      if (when.problems.length) return { ...retry(when.problems.join(' ')), clarificationContext: { ...context, safe: when.compactSafe, ambiguousHour: when.ambiguousHour } };
+      patch = {};
+      if (when.dueDate) patch.dueDate = when.dueDate;
+      if (when.dueTime) patch.dueTime = when.dueTime;
+      if (missing.has('assigneeId') && when.title) {
+        const members = Array.isArray(opts.members) ? opts.members : [];
+        const matches = members.filter((member) => member && typeof member.name === 'string' && member.name.trim().toLowerCase() === when.title.toLowerCase());
+        if (matches.length === 1) patch.assigneeId = matches[0].id;
+        else if (/^(?:unassigned|leave unassigned|no one|nobody)$/i.test(when.title)) patch.assigneeId = null;
+        else if (!missing.has('title')) return retry('Please choose a family member, or leave it unassigned.');
+      }
+      if (missing.has('title') && when.title && !Object.prototype.hasOwnProperty.call(patch, 'assigneeId')) patch.title = when.title;
+      else if (when.title && !Object.prototype.hasOwnProperty.call(patch, 'assigneeId')) return retry('Please give just the missing date or time, or open all details to change the request.');
+    } else if (answer && typeof answer === 'object' && !Array.isArray(answer) && (Object.getPrototypeOf(answer) === Object.prototype || Object.getPrototypeOf(answer) === null)) patch = answer;
+    else return retry('Please choose an option, type an answer, or open all details.');
+
+    const fields = ['title', 'dueDate', 'dueTime', 'assigneeId'];
+    const updates = {};
+    for (const field of fields) {
+      if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+      if (!missing.has(field)) {
+        if (patch[field] !== original[field]) return retry('I kept the details you already gave me. Open all details if you want to change them.');
+        continue;
+      }
+      const value = patch[field];
+      if (field === 'title' && (typeof value !== 'string' || !value.trim() || value.length > 300)) return retry('Please use a title from 1 to 300 characters.');
+      if (field === 'dueDate' && (typeof value !== 'string' || !validDate(value))) return retry('Please choose a real date, such as YYYY-MM-DD.');
+      if (field === 'dueTime' && (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value))) return retry('Please choose an exact Dubai time, such as 7 pm or 19:00.');
+      if (field === 'assigneeId' && value !== null && !(Array.isArray(opts.members) && opts.members.some((member) => member && member.id === value))) return retry('Please choose a known family member, or leave it unassigned.');
+      updates[field] = typeof value === 'string' ? value.trim() : value;
+    }
+    Object.assign(draft, updates);
+    for (const field of Object.keys(updates)) missing.delete(field);
+    if ((Object.prototype.hasOwnProperty.call(patch, 'dueDate') || Object.prototype.hasOwnProperty.call(patch, 'dueTime')) && draft.dueDate && draft.dueTime && dueEpoch(draft.dueDate, draft.dueTime) > now) {
+      missing.delete('dueDate');
+      missing.delete('dueTime');
+    }
+    if (missing.has('dueDate') && !draft.dueDate && draft.dueTime && draft.type !== 'appointment' && draft.repeat === 'none' && opts.efficientMode === true) {
+      draft.dueDate = dueEpoch(today(now), draft.dueTime) > now ? today(now) : addDays(today(now), 1);
+      missing.delete('dueDate');
+      assumptions.push(`Using ${draft.dueDate === today(now) ? 'today' : 'tomorrow'} (${draft.dueDate}), the next ${draft.dueTime} Dubai time.`);
+    }
+    if (draft.dueDate && draft.dueTime && dueEpoch(draft.dueDate, draft.dueTime) <= now) {
+      missing.add('dueDate'); missing.add('dueTime');
+      return retry('That time has already passed in Dubai. Please choose a future date and time.');
+    }
+    if (missing.size) return retry(planClarification({ ...result, draft, missing: [...missing] }, opts).question);
+    draft.remindAt = result.reminderRequested && draft.dueDate && draft.dueTime ? dueEpoch(draft.dueDate, draft.dueTime) : null;
+    const autoPlan = context.autoPlanEligible && !draft.dueTime && opts.planningEnabled === true;
+    return {
+      kind: draft.type === 'grocery' ? 'grocery' : 'task', draft,
+      ...(result.reminderRequested ? { reminderRequested: true } : {}),
+      ...(result.appointmentRequested ? { appointmentRequested: true } : {}),
+      ...(context.autoPlanEligible && !draft.dueTime ? { flexibleTaskRequested: true } : {}),
+      ...(autoPlan ? { autoPlanRequested: true } : {}),
+      ...(assumptions.length ? { assumptions } : {}),
+      message: draft.type === 'grocery' ? 'Save this grocery-list item locally. No order will be placed.' : draft.type === 'appointment' ? 'Save this appointment locally. Tidy has not contacted the provider or confirmed a booking.' : result.reminderRequested ? 'Save this reminder in Dubai time. Reminder delivery depends on available support.' : 'Save this task locally.'
+    };
+  }
+
+  const api = Object.freeze({ parse, planClarification, resolveClarification });
   root.TidyAssistant = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);
