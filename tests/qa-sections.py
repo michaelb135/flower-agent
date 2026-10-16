@@ -87,6 +87,43 @@ def navigation_item_visible(tab, name):
     return item
 
 
+def navigation_grid(tab, columns, rows, all_in_viewport=False):
+    """Check the buttons themselves fit; an overflow-hidden wrapper is not enough."""
+    dimensions = tab.locator("#main-navigation").evaluate("""node=>{
+      const bounds=node.getBoundingClientRect(), buttons=[...node.querySelectorAll('[data-view]')];
+      return {client:node.clientWidth,scroll:node.scrollWidth,viewport:innerWidth,
+        document:document.documentElement.scrollWidth,scrollLeft:node.scrollLeft,
+        position:getComputedStyle(node.closest('.navigation-shell')).position,
+        beforeContent:!!(node.compareDocumentPosition(document.querySelector('main')) & Node.DOCUMENT_POSITION_FOLLOWING),
+        rowPositions:[...new Set(buttons.map(item=>Math.round(item.getBoundingClientRect().top)))],
+        columns:getComputedStyle(node).gridTemplateColumns.split(' ').length,
+        buttons:buttons.map(item=>{const b=item.getBoundingClientRect();return {
+          name:item.dataset.view,left:b.left,right:b.right,top:b.top,bottom:b.bottom,
+          width:b.width,height:b.height,fontSize:parseFloat(getComputedStyle(item).fontSize),
+          fits:b.left>=bounds.left-1 && b.right<=bounds.right+1,
+          textFits:item.scrollWidth<=item.clientWidth+1,
+          inViewport:b.left>=-1 && b.right<=innerWidth+1 && b.top>=-1 && b.bottom<=innerHeight+1
+        }})};
+    }""")
+    assert dimensions["columns"] == columns, dimensions
+    assert len(dimensions["rowPositions"]) == rows, dimensions
+    assert dimensions["scroll"] <= dimensions["client"] + 1, dimensions
+    assert dimensions["document"] <= dimensions["viewport"] + 1, dimensions
+    assert dimensions["scrollLeft"] == 0, dimensions
+    assert dimensions["position"] not in {"fixed", "sticky", "absolute"}, dimensions
+    assert dimensions["beforeContent"], dimensions
+    assert len(dimensions["buttons"]) == len(NAV_PAGES), dimensions
+    assert all(item["fits"] and item["textFits"] for item in dimensions["buttons"]), dimensions
+    assert all(item["height"] >= 44 and item["width"] >= 44 and item["fontSize"] >= 12
+               for item in dimensions["buttons"]), dimensions
+    if all_in_viewport:
+        assert all(item["inViewport"] for item in dimensions["buttons"]), dimensions
+    assert tab.locator("#navigation-previous, #navigation-next, #navigation-hint").count() == 0
+    return {"columns": columns, "rows": rows, "buttons": len(dimensions["buttons"]),
+            "noHorizontalScrolling": True, "topNavigationInNormalFlow": True,
+            "readableTextAnd44pxTargets": True}
+
+
 def meal(tab, kind):
     section(tab, "meals")
     tab.locator(f'[data-meal="{kind}"]').click()
@@ -242,26 +279,9 @@ def main():
             tab = page(context)
             before = state(tab)
             destination(tab, "today")
-            nav = tab.locator("#main-navigation")
-            assert nav.get_attribute("aria-describedby") == "navigation-hint"
-            assert tab.locator("#navigation-hint").is_visible()
-            dimensions = nav.evaluate("""node=>({client:node.clientWidth,scroll:node.scrollWidth,
-              document:document.documentElement.scrollWidth,viewport:innerWidth,
-              rows:[...new Set([...node.querySelectorAll('[data-view]')].map(item=>Math.round(item.getBoundingClientRect().top)))]})""")
-            assert dimensions["scroll"] > dimensions["client"], dimensions
-            assert dimensions["document"] <= dimensions["viewport"] + 1, dimensions
-            assert len(dimensions["rows"]) == 1, dimensions
-            assert tab.locator(".navigation-shell").evaluate("node=>getComputedStyle(node).position") == "fixed"
-            assert tab.locator("#navigation-previous").is_disabled()
-            assert not tab.locator("#navigation-next").is_disabled()
-            start_scroll = nav.evaluate("node=>node.scrollLeft")
-            tab.locator("#navigation-next").click()
-            tab.wait_for_function("previous=>document.getElementById('main-navigation').scrollLeft>previous+20", arg=start_scroll)
-            destination(tab, "today")
-            assert not tab.locator("#navigation-previous").is_disabled()
-            tab.locator("#navigation-previous").click()
-            tab.wait_for_function("document.getElementById('main-navigation').scrollLeft<=1")
-            destination(tab, "today")
+            grid = navigation_grid(tab, columns=3, rows=6)
+            width = tab.viewport_size["width"]
+            tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
 
             # This is navigation, rather than an ARIA tablist: arrow keys move
             # focus to a section name and Enter activates that actual page.
@@ -282,6 +302,15 @@ def main():
             destination(tab, "tools")
             tab.keyboard.press("Enter")
             destination(tab, "today")
+            tab.locator('.app-nav [data-view="today"]').focus()
+            tab.keyboard.press("ArrowDown")
+            assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
+            destination(tab, "today")
+            tab.keyboard.press("ArrowUp")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            tab.keyboard.press("ArrowDown")
+            tab.keyboard.press("Enter")
+            destination(tab, "meals")
 
             tab.locator('.app-nav [data-view="meals"]').click()
             destination(tab, "meals")
@@ -300,16 +329,73 @@ def main():
             destination(tab, "planning-settings")
             navigation_item_visible(tab, "planning-settings")
             assert state(tab) == before
-            width = tab.viewport_size["width"]
-            tab.screenshot(path=str(args.output / f"direct-navigation-{width}.png"))
+            navigation_grid(tab, columns=3, rows=6)
             return {"width": width, "allFunctionsAreMainNavigationPeers": len(NAV_PAGES),
-                    "menuAndGroceriesAdjacent": True, "singleScrollableNavigationRow": True,
-                    "documentHasNoHorizontalOverflow": True, "scrollArrowsDoNotChangeSection": True,
-                    "arrowKeyFocusAndEnterActivation": True, "activeDeepLinkRevealedAfterReload": True,
+                    "menuAndGroceriesAdjacent": True, "grid": grid,
+                    "documentHasNoHorizontalOverflow": True,
+                    "arrowKeyFocusAndEnterActivation": True, "verticalKeyboardMatchesColumns": True,
+                    "activeDeepLinkAfterReload": True,
                     "savedDataUnchanged": True}
 
-        run("320px direct main navigation scrolls, supports keyboard and reveals the active section", phone_navigation, width=320)
-        run("390px direct main navigation scrolls, supports keyboard and reveals the active section", phone_navigation, width=390)
+        run("320px top navigation shows all 18 sections in a readable grid without sideways scrolling", phone_navigation, width=320)
+        run("390px top navigation shows all 18 sections in a readable grid without sideways scrolling", phone_navigation, width=390)
+
+        def desktop_navigation(context):
+            tab = page(context)
+            before = state(tab)
+            grid = navigation_grid(tab, columns=9, rows=2, all_in_viewport=True)
+            tab.locator('.app-nav [data-view="today"]').focus()
+            tab.keyboard.press("ArrowDown")
+            assert tab.locator('.app-nav [data-view="routines"]').evaluate("node=>node===document.activeElement")
+            destination(tab, "today")
+            tab.keyboard.press("ArrowUp")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            tab.keyboard.press("ArrowDown")
+            tab.keyboard.press("Enter")
+            destination(tab, "routines")
+            assert tab.locator("#view-routines h1").evaluate("node=>node===document.activeElement")
+            tab.locator('.app-nav [data-view="today"]').click()
+            tab.evaluate("scrollTo(0,0)")
+            navigation_grid(tab, columns=9, rows=2, all_in_viewport=True)
+            width = tab.viewport_size["width"]
+            tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
+            assert state(tab) == before
+            return {"width": width, "grid": grid, "all18VisibleAtOnce": True,
+                    "verticalKeyboardMovesNineButtons": True, "enterOpensActualFunction": True,
+                    "savedDataUnchanged": True}
+
+        run("1024px desktop shows exactly two top navigation rows and keyboard activation works", desktop_navigation, width=1024)
+        run("1440px desktop shows exactly two top navigation rows and keyboard activation works", desktop_navigation, width=1440)
+
+        def resize_navigation(context):
+            tab = page(context)
+            section(tab, "shopping")
+            grocery(tab, "Resize check bread", "1 loaf")
+            before = state(tab)
+            before_saved = saved(tab)
+            current_url = tab.url
+            layouts = []
+            for width, columns, rows in [(1440, 9, 2), (768, 6, 3), (390, 3, 6),
+                                         (320, 3, 6), (560, 3, 6), (561, 6, 3),
+                                         (959, 6, 3), (960, 9, 2), (1024, 9, 2)]:
+                tab.set_viewport_size({"width": width, "height": 950})
+                tab.evaluate("scrollTo(0,0)")
+                layout = navigation_grid(tab, columns, rows)
+                layouts.append({"width": width, **layout})
+                destination(tab, "shopping")
+                assert tab.url == current_url
+                assert state(tab) == before
+                assert saved(tab) == before_saved
+                tab.locator('.app-nav [data-view="today"]').focus()
+                tab.keyboard.press("ArrowDown")
+                target = NAV_PAGES[columns]
+                assert tab.locator(f'.app-nav [data-view="{target}"]').evaluate("node=>node===document.activeElement")
+                destination(tab, "shopping")
+            assert tab.locator("#shopping-tasks").inner_text().find("Resize check bread") >= 0
+            return {"layouts": layouts, "resizeKeepsRoute": True, "resizeKeepsSavedAndInMemoryData": True,
+                    "verticalKeyboardRecomputesColumnsAfterResize": True}
+
+        run("Navigation reflows at phone, tablet and desktop boundaries without changing the current page or saved data", resize_navigation, width=1440)
 
         def useful_controls(context):
             tab = page(context)
