@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const Core = require('../web/core.js');
+const MenuHelper = require('../web/menu-helper.js');
 const NOW = Date.parse('2026-10-12T12:00:00Z');
 
 function task(state, overrides = {}) {
@@ -15,6 +16,31 @@ test('classic browser script provides TidyCore without module support', () => {
   vm.runInNewContext(fs.readFileSync(require.resolve('../web/core.js'), 'utf8'), sandbox);
   assert.equal(typeof sandbox.TidyCore.createTask, 'function');
   assert.equal(sandbox.TidyCore.defaults().settings.timezone, 'Asia/Dubai');
+});
+
+test('browser core keeps legacy data readable and refuses to discard menu data when its helper is unavailable', () => {
+  const sandbox = { URL, TextEncoder, Date, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/core.js'), 'utf8'), sandbox);
+  const state = sandbox.TidyCore.defaults();
+  assert.equal(Object.hasOwn(sandbox.TidyCore.parseBackup(sandbox.TidyCore.backupJSON(state)), 'menuHelper'), false);
+  state.menuHelper = { version: 1, people: 4, preferences: [], draft: null };
+  assert.throws(() => sandbox.TidyCore.backupJSON(state), /Menu helper is unavailable/);
+});
+
+test('classic browser scripts validate optional menu data with the shared recipe model loaded first', () => {
+  const sandbox = { URL, TextEncoder, Date, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/menu-helper.js'), 'utf8'), sandbox);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/core.js'), 'utf8'), sandbox);
+  const result = vm.runInNewContext(`
+    const menuState = TidyCore.defaults();
+    const prepared = TidyMenuHelper.createDraft('tomato pasta', { now: ${NOW}, id: 'browser-menu' });
+    menuState.menuHelper = { ...TidyMenuHelper.emptyState(), draft: prepared.draft };
+    JSON.stringify(TidyCore.parseBackup(TidyCore.backupJSON(menuState)).menuHelper);
+  `, sandbox);
+  const restored = JSON.parse(result);
+  assert.equal(restored.draft.recipeId, 'tomato-pasta');
+  assert.equal(restored.draft.items[0].amount, 360);
+  assert.equal(restored.draft.status, 'draft');
 });
 
 test('Dubai dates change at UTC 20:00 and due times use UTC+4', () => {
@@ -428,6 +454,7 @@ test('conditional persistence rejects a changed stored snapshot without overwrit
 test('legacy backups keep manual meal plans absent, including at the backup size boundary', () => {
   const state = Core.defaults();
   assert.equal(Object.hasOwn(state, 'mealPlans'), false);
+  assert.equal(Object.hasOwn(state, 'menuHelper'), false);
   const template = task(state, { id: 'template', notes: 'a'.repeat(8500) });
   state.tasks = Array.from({ length: 119 }, (_, index) => ({ ...template, id: 'near-' + index }));
   // Fill the remaining space with valid notes until the old backup is only
@@ -444,10 +471,76 @@ test('legacy backups keep manual meal plans absent, including at the backup size
   assert.equal(Buffer.byteLength(backup), 1024 * 1024 - 20);
   const restored = Core.parseBackup(backup);
   assert.equal(Object.hasOwn(restored, 'mealPlans'), false);
+  assert.equal(Object.hasOwn(restored, 'menuHelper'), false);
   assert.equal(Core.backupJSON(restored), backup);
   let saved;
   Core.persist({ setItem: (_, text) => { saved = text; } }, restored);
   assert.equal(saved, backup);
+  assert.throws(() => Core.persistIfUnchanged({ getItem: () => saved, setItem: (_, text) => { saved = text; } }, { ...restored, menuHelper: MenuHelper.emptyState() }, backup), /1 MiB/);
+  assert.equal(saved, backup);
+});
+
+function quickMenuFixture() {
+  const preferences = [{ ingredientId: 'tinnedTomatoes', productName: 'My saved tomatoes', store: 'Waitrose', url: 'https://www.waitrose.ae/products/tomatoes', source: 'Saved by you in Tidy' }];
+  const prepared = MenuHelper.createDraft('tomato pasta', { people: 4, preferences, now: NOW, id: 'menu-backup-test' });
+  assert.equal(prepared.ok, true);
+  return { version: 1, people: 4, preferences, draft: MenuHelper.approveDraft(prepared.draft, { now: NOW + 1000 }) };
+}
+
+test('quick-menu drafts and explicit product choices round-trip with responsibilities and remain independent copies', () => {
+  const state = Core.defaults();
+  task(state, { title: 'School books', assigneeId: 'mum' });
+  state.mealSummary = [{ day: 'Monday', name: 'Existing dinner' }];
+  state.menuHelper = quickMenuFixture();
+  const text = Core.backupJSON(state);
+  const restored = Core.parseBackup(text);
+  assert.deepEqual(restored, state);
+  assert.equal(restored.menuHelper.draft.status, 'approved');
+  assert.equal(restored.menuHelper.draft.items.find(item => item.ingredientId === 'tinnedTomatoes').source, 'Saved by you in Tidy');
+  assert.equal(restored.actions.length, 0);
+  let stored = null;
+  Core.persistIfUnchanged({ getItem: () => stored, setItem: (_, value) => { stored = value; } }, state, null);
+  assert.equal(stored, text);
+  restored.menuHelper.preferences[0].productName = 'Changed copy';
+  restored.menuHelper.draft.items[0].amount = 1;
+  assert.equal(Core.backupJSON(state), text);
+  assert.equal(state.tasks[0].title, 'School books');
+  assert.equal(state.mealSummary[0].name, 'Existing dinner');
+});
+
+test('invalid quick-menu imports cannot replace recoverable responsibilities or invent retailer provenance', () => {
+  const state = Core.defaults();
+  task(state);
+  state.menuHelper = quickMenuFixture();
+  const before = Core.backupJSON(state);
+  let stored = before;
+  const storage = { getItem: () => stored, setItem: (_, value) => { stored = value; } };
+  const changes = [
+    helper => { helper.version = 2; },
+    helper => { helper.people = 0; },
+    helper => { helper.preferences.push({ ...helper.preferences[0] }); },
+    helper => { helper.preferences[0].source = 'Last bought from Waitrose'; },
+    helper => { helper.preferences[0].url = 'https://user:password@www.waitrose.ae/'; },
+    helper => { helper.draft.items[0].url = 'javascript:alert(1)'; },
+    helper => { helper.draft.items[0].amount = -1; },
+    helper => { helper.draft.items[0].amount = Infinity; },
+    helper => { helper.draft.items[0].source = 'Retailer order history'; },
+    helper => { helper.draft.items.push({ ...helper.draft.items[0] }); },
+    helper => { helper.draft.status = 'ordered'; },
+    helper => { helper.draft.approvedAt = null; },
+    helper => { helper.draft.status = 'draft'; },
+    helper => { helper.draft.items.forEach(item => { item.included = false; }); }
+  ];
+  for (const change of changes) {
+    const candidate = JSON.parse(before);
+    change(candidate.menuHelper);
+    assert.throws(() => Core.validateSnapshot(candidate));
+    assert.throws(() => Core.parseBackup(JSON.stringify(candidate)));
+    assert.throws(() => Core.persistIfUnchanged(storage, candidate, before));
+    assert.equal(stored, before);
+    assert.equal(Core.backupJSON(state), before);
+  }
+  assert.throws(() => Core.validateSnapshot({ ...state, menuHelper: null }));
 });
 
 test('manual weekday meals trim names, preserve the other plan and round-trip without changing dinner or responsibilities', () => {

@@ -193,7 +193,7 @@
       for(const item of ui.mealGroceries){const row=el('li');row.append(el('span',item.name),el('span',item.amount+' '+item.unit));list.append(row);}
       if(!ui.mealGroceries.length)list.append(el('li','Nothing missing from your reviewed meal plan.'));
     }else $('meal-shopping-status').textContent='Check the kitchen and approve the meal grocery draft to include its ingredients here and in the download.';
-    $('download-shopping').disabled=!items.length&&!(ui.mealVerified&&ui.groceriesApproved);
+    $('download-shopping').disabled=!items.length&&!(ui.mealVerified&&ui.groceriesApproved)&&!ui.quickMenu?.getApprovedItems().length;
   }
   function saveGrocery(event){
     event.preventDefault();error('grocery-error','');$('grocery-status').textContent='';
@@ -217,10 +217,12 @@
     const items=state.tasks.filter(task=>task.status==='open'&&task.type==='grocery'),lines=['Tidy shopping list · '+C.today(),'No order has been placed. Check amounts, package sizes and prices before buying.','','HOUSEHOLD REQUESTS'];
     for(const task of items)lines.push('- '+task.title+' — '+(task.quantity||'quantity to check')+(task.assigneeId?' · '+memberName(task.assigneeId):''));
     if(!items.length)lines.push('None entered.');
+    const quickMealLines=ui.quickMenu?.shoppingText()||[];
+    lines.push('','CURRENT MEAL',...(quickMealLines.length?quickMealLines:['No approved current meal.']));
     lines.push('','WEEKDAY MEAL GROCERIES');
     if(ui.mealVerified&&ui.groceriesApproved){for(const item of ui.mealGroceries)lines.push('- '+item.name+' — '+item.amount+' '+item.unit);if(!ui.mealGroceries.length)lines.push('Nothing missing.');}
     else lines.push('Not included: approve the meal grocery draft first.');
-    lines.push('','Matching names in the two groups stay separate; check them together before buying.');
+    lines.push('','Matching names in these groups stay separate; check them together before buying.');
     download('Tidy-shopping-'+C.today()+'.txt',lines.join('\n')+'\n','text/plain;charset=utf-8');
   }
   function renderHealthSquare(){
@@ -249,7 +251,7 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();ui.quickMenu?.render();
   }
   function planningProfile(){return state.planningProfile||P.defaults();}
   function beginPlanningEdit(){if(!ui.planningEditing){ui.planningEditing=true;ui.planningBaseline=copy(planningProfile());}}
@@ -897,6 +899,7 @@
   window.addEventListener('storage',event=>{if(event.key!==KEY&&event.key!==null)return;try{if(refreshSavedData()){renderAll();toast('Saved data updated from another tab on this browser.');}}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
   window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'today',true,true));
+  ui.quickMenu=window.TidyQuickMenuUI.create({getState:()=>state,mutate:(work,message)=>mutate(()=>work(state),message),getSaved:()=>!ui.saveFailed&&!ui.storageLocked&&!ui.mealConflict,openWebsite,showView,onChanged:renderAll});
   setupVoice();showView(location.hash.slice(1)||'today',false,true);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
   // The iframe may finish loading before the parent registers its listeners.

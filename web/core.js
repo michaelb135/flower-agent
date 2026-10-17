@@ -221,6 +221,15 @@
     }
     return result;
   }
+  function cleanMenuHelper(value) {
+    // The quick-menu model owns its recipe and product-preference schema. Keep
+    // it optional so an existing backup remains usable without new empty data.
+    const helper = typeof module !== 'undefined' && module.exports
+      ? require('./menu-helper.js')
+      : root.TidyMenuHelper;
+    if (!helper || typeof helper.validateState !== 'function') fail('Menu helper is unavailable. Reload Tidy before opening this menu data.');
+    return helper.validateState(value);
+  }
   function cleanPlanningProfile(value) {
     object(value, 'Family routine');
     const result = { enabled: bool(value.enabled, false, 'Automatic planning'), workDays: list(value.workDays, 7, 'Work days').map(day => integer(day, 0, 6, 'Work day')), schoolDays: list(value.schoolDays === undefined ? value.workDays : value.schoolDays, 7, 'School days').map(day => integer(day, 0, 6, 'School day')) };
@@ -286,6 +295,7 @@
     // Keep old backups byte-for-byte stable: manual breakfast/lunch plans are
     // optional until someone saves one, rather than expanding every old state.
     if (data.mealPlans !== undefined) result.mealPlans = cleanMealPlans(data.mealPlans);
+    if (data.menuHelper !== undefined) result.menuHelper = cleanMenuHelper(data.menuHelper);
     if (data.planningProfile !== undefined) result.planningProfile = cleanPlanningProfile(data.planningProfile);
     if (data.calendar !== undefined) result.calendar = cleanCalendar(data.calendar);
     if (bytes(JSON.stringify(result)) > BACKUP_LIMIT) fail('Backup exceeds the 1 MiB limit.');

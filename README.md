@@ -1,6 +1,6 @@
 # Tidy website
 
-A web app for household tasks, quick requests, assignments, routines, family planning, calendar import and grocery preparation. The deployable site is in `web/`. Only the fourteen reviewed runtime files are published; tests, screenshots and any saved user data are excluded.
+A web app for household tasks, quick requests, assignments, routines, family planning, calendar import and grocery preparation. The deployable site is in `web/`. Only the sixteen reviewed runtime files are published; tests, screenshots and any saved user data are excluded.
 
 ## Finding your sections
 
@@ -33,7 +33,13 @@ Calendar data, confirmed hours and optional task duration/explanations are inclu
 
 Tidy has 18 main navigation buttons, one for each screen. Home also offers a directory: meals, shopping lists, shopping websites, appointments, routines, household names, review requests, the clinic website, undated tasks and upcoming tasks each open their own focused page. Existing saved tasks and dinner plans are retained.
 
-Menu has separate **Breakfast**, **Lunch** and **Dinner** panels. Breakfast and lunch accept typed choices for Monday to Friday, with explicit save buttons, validation, backup support and protection against conflicting edits in another tab. These optional `mealPlans` fields do not expand older backups until a plan is saved. Typed meal names do not generate ingredients or retailer orders. Dinner retains the existing meal planner, preference checks and grocery approval flow.
+Menu starts with **What would you like to eat?** A short request such as “tomato pasta” or “I want spaghetti to tomato” prepares an editable ingredient draft with quantities for the displayed number of people. The local catalogue contains 21 simple dishes without beans. Unknown dishes offer a few supported choices instead of asking for a typed recipe. Unsupported additions or dietary exclusions require choosing and reviewing a supported recipe; this is not a connected generative AI or product-label checking service.
+
+Ingredient amounts and inclusion can be edited. Optional product names, stores and HTTPS product links can be saved using an explicit **Remember** choice when confirming the shopping draft. Saved product choices are labelled **Saved by you in Tidy**, never retailer purchase history. They are reused for compatible ingredients; an explicit spaghetti request does not silently become a saved penne product, and fresh tomatoes do not inherit a tinned-tomato preference. Drafts, approvals and product preferences stay in this browser and are included in backups. Edits invalidate approval. The approved current-meal group appears separately in Groceries and the shopping-list download. This version keeps one current meal draft at a time; weekday plans remain separate.
+
+Kibsons and Waitrose buttons open their websites for manual shopping. Tidy has no authorized retailer purchase-history, stock, pricing, basket or checkout integration. Opening a retailer inside Tidy cannot grant cross-origin access to its account. Confirmation approves the local shopping draft; it does not contact a shop or approve a payment. Real retailer integration requires a verified supported interface and separate account authorization.
+
+Menu also has separate **Breakfast**, **Lunch** and **Dinner** panels. Breakfast and lunch accept typed choices for Monday to Friday, with explicit save buttons, validation, backup support and protection against conflicting edits in another tab. These optional `mealPlans` fields do not expand older backups until a plan is saved. Typed meal names do not generate ingredients or retailer orders. Dinner retains the existing meal planner, preference checks and grocery approval flow.
 
 Ask Tidy shows the steps it performs and opens the resulting reminder, appointment, grocery item or task. Clear local requests save immediately, including short grocery entries such as “milk”. A compact **One quick question** dialog asks only for essential missing details, keeps the original request and offers date/time choices that save with one tap. A short typed answer such as “tomorrow at 7 pm” finishes the same request. **More details** opens the full editor when needed.
 
@@ -61,13 +67,15 @@ The original `tidy-day-organiser.jocundridge128.chatgpt.site` hosting project is
 
 ## Development checks
 
-Run `node --test tests/core.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs tests/calendar-connect.test.cjs`, `python3 tools/check_inline_scripts.py web/index.html web/meals.html web/calendar-auth.html`, and `python3 -m unittest discover -s tests -p 'test_inline_scripts.py'`. The publishing workflow checks both external and inline JavaScript before building.
+Run `node --test tests/core.test.cjs tests/menu-helper.test.cjs tests/assistant.test.cjs tests/calendar.test.cjs tests/planner.test.cjs tests/calendar-connect.test.cjs`, `python3 tools/check_inline_scripts.py web/index.html web/meals.html web/calendar-auth.html`, and `python3 -m unittest discover -s tests -p 'test_inline_scripts.py'`. The publishing workflow checks both external and inline JavaScript before building.
 
 Run `python3 tests/qa-calendar-connect.py --url http://127.0.0.1:8780/` for unconfigured setup, public-ID saving, provider consent fixtures, multipage account events, denied/expired access, partial failures, local backups, conflicting calendar updates and 320px controls. Provider SDK/API fixtures are intercepted and isolated; these checks never establish that real Google or Microsoft registration/consent works.
 
 Run `python3 tests/qa-planning.py --url http://127.0.0.1:8780/ --output .qa-results/planning/local` for real calendar-file import/export, first-visit setup, confirmed school/work availability, scheduled tasks and reminders, fixed appointment preservation, no-fit handling, backups, conflicting edits, failed writes and phone-sized layouts. It uses synthetic data and blocks requests outside the selected Tidy origin; it does not establish native calendar access or cross-device sync.
 
 For browser checks, serve `web/` internally on port 8780 and run `python3 tests/qa-website.py --url http://127.0.0.1:8780/`. The runner uses isolated synthetic data and intercepted retailer pages. It checks the four store destinations, failure recovery, deliberate direct opening, retry/close behavior, saved tasks/meals and narrow layouts. Do not present an internal localhost address as the published app or describe retailer fixtures as verified live login/checkout.
+
+Run `python3 tests/qa-quick-menu.py --url http://127.0.0.1:8780/ --output .qa-results/quick-menu/local` for short meal requests, inferred quantities, ingredient edits, explicit product memory, compatible reuse, approval, grocery downloads, backup/reload, conflicting tabs, failed local saves and phone controls. These checks use synthetic data and intercepted retailer pages; they do not verify retailer history or purchasing.
 
 Run `python3 tests/qa-sections.py --url http://127.0.0.1:8780/` to exercise all 18 direct navigation buttons and 15 Home destinations, two-row desktop navigation, readable phone grids and keyboard controls, direct grocery entry and duplicate handling, separate task lists, browser history, meal tabs, typed weekday choices, saved-data restoration, backup validation, conflicting meal edits, storage-failure recovery, keyboard controls and 320px layouts. All browser runners accept `--url` for the local server or confirmed published site and use isolated synthetic data.
 
