@@ -98,7 +98,8 @@ with sync_playwright() as playwright:
         return page.evaluate("TidyDemo.getState()")
 
     def tools():
-        page.locator('[data-view="tools"]').click()
+        page.locator("#open-settings").click()
+        page.locator('#settings-dialog [data-go="tools"]').click()
 
     def section(name):
         tools()

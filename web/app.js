@@ -11,6 +11,7 @@
   let state=C.defaults(), toastTimer;
   Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,pendingCapture:null,undoCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
+  const NAV_PARENT=Object.freeze({today:'today',planning:'today',tools:'today',assistant:'assistant',requests:'assistant',family:'family',routines:'family',inbox:'family',household:'family',meals:'meals',shopping:'shopping',stores:'shopping',calendar:'calendar',appointments:'calendar',reminders:'calendar',upcoming:'calendar',health:'calendar','planning-settings':'calendar'});
   Object.assign(ui,{planningEditing:false,planningBaseline:null,planningStatus:'',planResults:new Map(),calendarImportBusy:false,welcomeChoice:null});
   Object.assign(ui,{connectionConfig:{...DEFAULT_CONNECTION_CONFIG},connectionConfigBaseline:null,connectionConfigEditing:false,connectionConfigStatus:'',connector:null,accountProvider:null,accountBusy:false,accountMessage:''});
   const PROFILE_FIELDS=['enabled','workDays','schoolDays','workStart','workEnd','kidsHome','dayStart','dayEnd','taskMinutes','familyMinutes','bufferMinutes'];
@@ -82,10 +83,10 @@
   }
   function showView(view,focus=true,replace=false){
     const parts=view.split('/');view=parts[0];if(view==='meals'&&MEAL_SLIDES.includes(parts[1]))ui.mealSlide=parts[1];
-    if(!['today','assistant','family','routines','tools','reminders','appointments','meals','shopping','stores','requests','health','household','inbox','upcoming','calendar','planning','planning-settings'].includes(view))view='tools';
+    if(!Object.prototype.hasOwnProperty.call(NAV_PARENT,view))view='today';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
-    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===view)nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
+    for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===NAV_PARENT[view])nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
     const route='#'+view+(view==='meals'?'/'+ui.mealSlide:'');
     if(location.hash!==route)history[replace?'replaceState':'pushState'](null,'',route);renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
@@ -823,7 +824,7 @@
     if(event.key==='ArrowRight')next=Math.min(tabs.length-1,index+1);else if(event.key==='ArrowLeft')next=Math.max(0,index-1);else if(event.key==='ArrowDown')next=index+columns<tabs.length?index+columns:index;else if(event.key==='ArrowUp')next=index-columns>=0?index-columns:index;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;
     event.preventDefault();tabs[next].focus();
   });
-  for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>showView(link.dataset.go));
+  for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>{if($('settings-dialog').open&&$('settings-dialog').contains(link))$('settings-dialog').close();showView(link.dataset.go);});
   for(const tab of document.querySelectorAll('button[data-meal]')){
     tab.addEventListener('click',()=>selectMealSlide(tab.dataset.meal));
     tab.addEventListener('keydown',event=>{const index=MEAL_SLIDES.indexOf(tab.dataset.meal);let next;if(event.key==='ArrowRight')next=(index+1)%MEAL_SLIDES.length;else if(event.key==='ArrowLeft')next=(index+MEAL_SLIDES.length-1)%MEAL_SLIDES.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=MEAL_SLIDES.length-1;else return;event.preventDefault();selectMealSlide(MEAL_SLIDES[next],true);});

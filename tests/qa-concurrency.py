@@ -108,7 +108,8 @@ def save_task(page):
 
 
 def action_dialog(page, action_id=None):
-    page.locator('[data-view="tools"]').click()
+    page.locator("#open-settings").click()
+    page.locator('#settings-dialog [data-go="tools"]').click()
     page.locator('#view-tools [data-go="requests"]').click()
     if action_id:
         page.locator(f'[data-action-id="{action_id}"]').get_by_role("button", name="Edit draft", exact=True).click()
@@ -121,7 +122,8 @@ def save_action(page):
 
 
 def member_dialog(page, name):
-    page.locator('[data-view="tools"]').click()
+    page.locator("#open-settings").click()
+    page.locator('#settings-dialog [data-go="tools"]').click()
     page.locator('#view-tools [data-go="household"]').click()
     page.locator("#member-list").get_by_role("button", name=f"{name} · 0 open", exact=True).click()
 
@@ -135,7 +137,8 @@ def save_settings(page):
 
 
 def meals(page):
-    page.locator('[data-view="tools"]').click()
+    page.locator("#open-settings").click()
+    page.locator('#settings-dialog [data-go="tools"]').click()
     page.locator('#view-tools [data-go="meals"]').click()
     page.locator('[data-meal="dinner"]').click()
     page.locator("#show-meals").click()

@@ -25,10 +25,15 @@ DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 HUB_PAGES = ["meals", "shopping", "family", "reminders", "stores", "appointments", "routines",
              "household", "requests", "health", "inbox", "upcoming",
              "calendar", "planning", "planning-settings"]
-NAV_PAGES = ["today", "assistant", "family", "meals", "shopping", "reminders",
-             "appointments", "calendar", "planning", "routines", "stores",
-             "household", "requests", "health", "inbox", "upcoming",
-             "planning-settings", "tools"]
+NAV_PAGES = ["today", "assistant", "family", "meals", "shopping", "calendar"]
+NAV_PARENT = {"planning": "today", "tools": "today", "requests": "assistant",
+              "routines": "family", "inbox": "family", "household": "family",
+              "stores": "shopping", "appointments": "calendar", "reminders": "calendar",
+              "upcoming": "calendar", "health": "calendar", "planning-settings": "calendar"}
+BACK_PARENT = {"routines": "family", "inbox": "family", "appointments": "calendar",
+               "reminders": "calendar", "upcoming": "calendar", "stores": "shopping",
+               "requests": "assistant", "health": "appointments", "household": "family",
+               "planning": "today", "planning-settings": "planning", "tools": "today"}
 PRIMARY_CONTROLS = {
     "meals": "#meal-tab-breakfast", "shopping": "#grocery-form",
     "family": "#family-add", "reminders": "#reminders-add",
@@ -63,9 +68,26 @@ def state(tab):
     return tab.evaluate("TidyDemo.getState()")
 
 
+def directory(tab):
+    tab.locator('#open-settings').click()
+    tab.locator('#settings-dialog [data-go="tools"]').click()
+    assert not tab.locator('#settings-dialog').is_visible()
+
+
 def section(tab, name):
-    tab.locator('[data-view="tools"]').click()
-    tab.locator(f'#view-tools [data-go="{name}"]').click()
+    if name in NAV_PAGES:
+        tab.locator(f'.app-nav [data-view="{name}"]').click()
+    elif name in {"household", "planning-settings", "tools"}:
+        tab.locator('#open-settings').click()
+        tab.locator(f'#settings-dialog [data-go="{name}"]').click()
+        assert not tab.locator('#settings-dialog').is_visible()
+    elif name == "health":
+        section(tab, "appointments")
+        tab.locator('#view-appointments [data-go="health"]').click()
+    else:
+        parent = NAV_PARENT[name]
+        section(tab, parent)
+        tab.locator(f'#view-{parent} [data-go="{name}"]').click()
 
 
 def destination(tab, name):
@@ -73,7 +95,7 @@ def destination(tab, name):
     assert tab.locator("section.view:visible").get_attribute("id") == "view-" + name
     assert tab.url.split("#", 1)[1].split("/", 1)[0] == name, tab.url
     assert tab.locator('.app-nav [aria-current="page"]').count() == 1
-    assert tab.locator('.app-nav [aria-current="page"]').get_attribute("data-view") == name
+    assert tab.locator('.app-nav [aria-current="page"]').get_attribute("data-view") == NAV_PARENT.get(name, name)
 
 
 def navigation_item_visible(tab, name):
@@ -253,7 +275,7 @@ def main():
                 assert tab.locator(f"#view-{view} h1").evaluate("node=>node===document.activeElement")
                 navigation_item_visible(tab, view)
             assert state(tab) == before
-            assert sorted(tab.locator("#view-tools [data-go]").evaluate_all("nodes=>nodes.map(node=>node.dataset.go)")) == sorted(HUB_PAGES)
+            assert sorted(tab.locator("#view-tools .section-tile[data-go]").evaluate_all("nodes=>nodes.map(node=>node.dataset.go)")) == sorted(HUB_PAGES)
             assert tab.locator("#view-tools form").count() == 0
             for name in HUB_PAGES:
                 section(tab, name)
@@ -265,21 +287,26 @@ def main():
                 tab.reload()
                 tab.wait_for_function("!!window.TidyDemo")
                 destination(tab, name)
-                navigation_item_visible(tab, name)
-                tab.locator(f'#view-{name} .section-back').click()
-                destination(tab, "tools")
+                navigation_item_visible(tab, NAV_PARENT.get(name, name))
+                back = tab.locator(f'#view-{name} .section-back')
+                if name in BACK_PARENT:
+                    assert back.count() == 1
+                    back.click()
+                    destination(tab, BACK_PARENT[name])
+                else:
+                    assert back.count() == 0
             assert state(tab) == before
             return {"mainDestinations": len(NAV_PAGES), "oneVisibleFunctionAtATime": True,
                     "everyMainButtonFocusesItsHeading": True, "navigationDoesNotModifyData": True,
                     "focusedHubDestinations": len(HUB_PAGES), "deepLinksAndBackButtons": True}
 
-        run("All 18 main navigation buttons open one focused page directly and preserve saved data", focused_navigation)
+        run("Six main navigation buttons and their nested sections preserve saved data and deep links", focused_navigation)
 
         def phone_navigation(context):
             tab = page(context)
             before = state(tab)
             destination(tab, "today")
-            grid = navigation_grid(tab, columns=3, rows=6)
+            grid = navigation_grid(tab, columns=3, rows=2)
             width = tab.viewport_size["width"]
             tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
 
@@ -290,16 +317,16 @@ def main():
             assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             destination(tab, "today")
             tab.keyboard.press("End")
-            assert tab.locator('.app-nav [data-view="tools"]').evaluate("node=>node===document.activeElement")
-            navigation_item_visible(tab, "tools")
+            assert tab.locator('.app-nav [data-view="calendar"]').evaluate("node=>node===document.activeElement")
+            navigation_item_visible(tab, "calendar")
             destination(tab, "today")
             tab.keyboard.press("Enter")
-            destination(tab, "tools")
-            assert tab.locator("#tools-title").evaluate("node=>node===document.activeElement")
-            tab.locator('.app-nav [data-view="tools"]').focus()
+            destination(tab, "calendar")
+            assert tab.locator("#calendar-title").evaluate("node=>node===document.activeElement")
+            tab.locator('.app-nav [data-view="calendar"]').focus()
             tab.keyboard.press("Home")
             assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
-            destination(tab, "tools")
+            destination(tab, "calendar")
             tab.keyboard.press("Enter")
             destination(tab, "today")
             tab.locator('.app-nav [data-view="today"]').focus()
@@ -322,46 +349,46 @@ def main():
             tab.evaluate("location.hash='planning-settings'")
             tab.wait_for_function("!document.getElementById('view-planning-settings').hidden")
             destination(tab, "planning-settings")
-            navigation_item_visible(tab, "planning-settings")
+            navigation_item_visible(tab, "calendar")
             assert_no_overflow(tab, "#view-planning-settings")
             tab.reload()
             tab.wait_for_function("!!window.TidyDemo")
             destination(tab, "planning-settings")
-            navigation_item_visible(tab, "planning-settings")
+            navigation_item_visible(tab, "calendar")
             assert state(tab) == before
-            navigation_grid(tab, columns=3, rows=6)
-            return {"width": width, "allFunctionsAreMainNavigationPeers": len(NAV_PAGES),
+            navigation_grid(tab, columns=3, rows=2)
+            return {"width": width, "sixPrimarySections": len(NAV_PAGES),
                     "menuAndGroceriesAdjacent": True, "grid": grid,
                     "documentHasNoHorizontalOverflow": True,
                     "arrowKeyFocusAndEnterActivation": True, "verticalKeyboardMatchesColumns": True,
                     "activeDeepLinkAfterReload": True,
                     "savedDataUnchanged": True}
 
-        run("320px top navigation shows all 18 sections in a readable grid without sideways scrolling", phone_navigation, width=320)
-        run("390px top navigation shows all 18 sections in a readable grid without sideways scrolling", phone_navigation, width=390)
+        run("320px top navigation shows six main sections in two rows in a readable grid without sideways scrolling", phone_navigation, width=320)
+        run("390px top navigation shows six main sections in two rows in a readable grid without sideways scrolling", phone_navigation, width=390)
 
         def desktop_navigation(context):
             tab = page(context)
             before = state(tab)
-            grid = navigation_grid(tab, columns=9, rows=2, all_in_viewport=True)
+            grid = navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
             tab.locator('.app-nav [data-view="today"]').focus()
             tab.keyboard.press("ArrowDown")
-            assert tab.locator('.app-nav [data-view="routines"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
             destination(tab, "today")
             tab.keyboard.press("ArrowUp")
             assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowDown")
             tab.keyboard.press("Enter")
-            destination(tab, "routines")
-            assert tab.locator("#view-routines h1").evaluate("node=>node===document.activeElement")
+            destination(tab, "meals")
+            assert tab.locator("#view-meals h1").evaluate("node=>node===document.activeElement")
             tab.locator('.app-nav [data-view="today"]').click()
             tab.evaluate("scrollTo(0,0)")
-            navigation_grid(tab, columns=9, rows=2, all_in_viewport=True)
+            navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
             width = tab.viewport_size["width"]
             tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
             assert state(tab) == before
-            return {"width": width, "grid": grid, "all18VisibleAtOnce": True,
-                    "verticalKeyboardMovesNineButtons": True, "enterOpensActualFunction": True,
+            return {"width": width, "grid": grid, "allSixVisibleAtOnce": True,
+                    "verticalKeyboardMovesThreeButtons": True, "enterOpensActualFunction": True,
                     "savedDataUnchanged": True}
 
         run("1024px desktop shows exactly two top navigation rows and keyboard activation works", desktop_navigation, width=1024)
@@ -375,9 +402,7 @@ def main():
             before_saved = saved(tab)
             current_url = tab.url
             layouts = []
-            for width, columns, rows in [(1440, 9, 2), (768, 6, 3), (390, 3, 6),
-                                         (320, 3, 6), (560, 3, 6), (561, 6, 3),
-                                         (959, 6, 3), (960, 9, 2), (1024, 9, 2)]:
+            for width, columns, rows in [(width, 3, 2) for width in [1440, 768, 390, 320, 560, 561, 959, 960, 1024]]:
                 tab.set_viewport_size({"width": width, "height": 950})
                 tab.evaluate("scrollTo(0,0)")
                 layout = navigation_grid(tab, columns, rows)
@@ -399,7 +424,7 @@ def main():
 
         def useful_controls(context):
             tab = page(context)
-            tab.locator('[data-view="reminders"]').click()
+            section(tab, "reminders")
             tab.locator("#reminders-add").click()
             full_task_editor(tab)
             tab.locator("#task-title").fill("Take a family break")
@@ -463,9 +488,9 @@ def main():
             tab = page(context)
             before = state(tab)
             destination(tab, "today")
-            tab.locator('.app-nav [data-view="tools"]').click()
+            directory(tab)
             destination(tab, "tools")
-            assert tab.locator("#tools-title").inner_text() == "Home"
+            assert tab.locator("#tools-title").inner_text() == "All sections"
             groups = tab.locator("#view-tools .section-group")
             assert groups.count() == 4
             assert groups.first.locator("[data-go]").evaluate_all("nodes=>nodes.map(node=>node.dataset.go)") == ["meals", "shopping", "family", "reminders", "appointments", "calendar"]
@@ -477,16 +502,16 @@ def main():
                 tab.locator(".brand").click()
                 destination(tab, "today")
             tab.locator('[data-view="today"]').click()
-            assert tab.locator(".today-shortcuts button").count() == 2
+            assert tab.locator(".today-shortcuts button").count() == 1
             assert tab.locator("#today-meals").count() == 0
             assert tab.locator("#today-reminders").count() == 0
             assert tab.locator("#today-appointments").count() == 0
             assert state(tab) == before
-            return {"todayFirst": True, "optionalHomeDirectory": True, "groupedDestinations": 15, "primarySections": 6,
+            return {"todayFirst": True, "directoryUnderSettings": True, "groupedDestinations": 15, "primarySections": 6,
                     "menuAndGroceriesDistinct": True, "navigationDoesNotModifyData": True,
-                    "todayShortcuts": 2}
+                    "todayShortcuts": 1}
 
-        run("Optional Home directory groups sections while Today remains the starting page", home_directory)
+        run("Optional Settings directory groups sections while Today remains the starting page", home_directory)
 
         def direct_groceries(context):
             tab = page(context)
@@ -667,11 +692,11 @@ def main():
             tab.wait_for_function("!document.getElementById('view-appointments').hidden")
             destination(tab, "appointments")
             tab.evaluate("location.hash='unrecognised-section'")
-            tab.wait_for_function("!document.getElementById('view-tools').hidden")
-            destination(tab, "tools")
+            tab.wait_for_function("!document.getElementById('view-today').hidden")
+            destination(tab, "today")
             assert state(tab) == before
             return {"browserBackAndForward": True, "mealSlideRestored": True,
-                    "reloadAndHashChange": True, "unknownSectionReturnsHome": True,
+                    "reloadAndHashChange": True, "unknownSectionReturnsToday": True,
                     "savedDataUnchanged": True}
 
         run("Browser navigation and deep links restore the correct section without editing saved data", navigation_history)
@@ -679,7 +704,7 @@ def main():
         def phone_organisation(context):
             tab = page(context)
             destination(tab, "today")
-            tab.locator('.app-nav [data-view="tools"]').click()
+            directory(tab)
             destination(tab, "tools")
             assert_no_overflow(tab, "#view-tools")
             menu_button = tab.locator('#view-tools [data-go="meals"]')
@@ -710,7 +735,7 @@ def main():
             return {"width": 320, "keyboardActivationAndFocus": True,
                     "typedMenuSurvivesRelatedNavigation": True, "allSectionsFitViewport": True}
 
-        run("320px Home and focused sections support keyboard use and retain a typed menu", phone_organisation, width=320)
+        run("320px Settings directory and focused sections support keyboard use and retain a typed menu", phone_organisation, width=320)
 
         def grocery_quota(context):
             tab = page(context)

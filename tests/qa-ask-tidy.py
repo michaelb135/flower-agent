@@ -523,17 +523,19 @@ def main():
             tab.locator("#assistant-activity-dismiss").click()
             assert not tab.locator("#assistant-activity").is_visible()
             tab.locator('[data-view="today"]').click()
-            tab.locator('#view-today [data-go="tools"]').click()
+            tab.locator("#open-settings").click()
+            tab.locator('#settings-dialog [data-go="tools"]').click()
             assert_destination(tab, "tools")
             tab.locator('#view-tools [data-go="appointments"]').click()
             assert_destination(tab, "appointments")
-            tab.locator('[data-view="reminders"]').click()
+            tab.locator('[data-view="calendar"]').click()
+            tab.locator('#view-calendar [data-go="reminders"]').click()
             assert_destination(tab, "reminders")
             assert saved(tab)["tasks"] == [task]
             return {"receiptHiddenOnUnrelatedPage": True, "receiptPreservedOnAsk": True,
-                    "receiptReopensSavedRecord": True, "homeAndReminderNavigation": True, "dismissPreservesTask": True}
+                    "receiptReopensSavedRecord": True, "directoryAndReminderNavigation": True, "dismissPreservesTask": True}
 
-        run("Receipt stays with Ask and its result while Home and Reminders open their dedicated pages", receipt_navigation)
+        run("Receipt stays with Ask and its result while the Settings directory and Calendar reminders remain reachable", receipt_navigation)
 
         def past_reminder(tab):
             before = saved(tab)

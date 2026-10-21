@@ -70,7 +70,8 @@ def main():
             return tab
 
         def section(tab, name):
-            tab.locator('[data-view="tools"]').click()
+            tab.locator("#open-settings").click()
+            tab.locator('#settings-dialog [data-go="tools"]').click()
             tab.locator(f'#view-tools [data-go="{name}"]').click()
             tab.locator(f"#view-{name}").wait_for(state="visible")
 

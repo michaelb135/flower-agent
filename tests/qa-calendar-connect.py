@@ -110,7 +110,8 @@ def saved(tab):
 
 
 def section(tab, name):
-    tab.locator('[data-view="tools"]').click()
+    tab.locator("#open-settings").click()
+    tab.locator('#settings-dialog [data-go="tools"]').click()
     tab.locator(f'#view-tools [data-go="{name}"]').click()
     assert tab.locator("section.view:visible").count() == 1
     assert tab.locator("#view-" + name).is_visible()
