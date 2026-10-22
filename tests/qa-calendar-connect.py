@@ -113,6 +113,8 @@ def section(tab, name):
     tab.locator("#open-settings").click()
     tab.locator('#settings-dialog [data-go="tools"]').click()
     tab.locator(f'#view-tools [data-go="{name}"]').click()
+    if name == "calendar":
+        skip_intro(tab)
     assert tab.locator("section.view:visible").count() == 1
     assert tab.locator("#view-" + name).is_visible()
 

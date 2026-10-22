@@ -577,7 +577,53 @@
     };
   }
 
-  const api = Object.freeze({ parse, planClarification, resolveClarification });
+  // These standalone commands connect Ask Tidy to existing local screens.
+  // They are deliberately separate from parse(): requests to save, remind,
+  // purchase, book or message still follow the established review flow.
+  function routeRequest(input) {
+    if (typeof input !== 'string' || input.length > 1000 || !input.trim() || /[\u0000-\u001f\u007f<>]/.test(input)) return null;
+    const text = input.normalize('NFKC').replace(/\s+/g, ' ').trim()
+      .replace(/[.!?]+$/, '').trim().replace(/^please\s+/i, '').replace(/\s+please$/i, '').trim();
+    if (!text || /https?:\/\/|javascript:|data:/i.test(text)) return null;
+    const navigation = text.match(/^(?:open|show)(?: me)?(?: my| the)? (menu|groceries|grocery list|shopping list|calendar|tasks|requests|requests to review|today)$/i);
+    if (navigation) {
+      const destinations = {
+        menu: ['meals', 'your menu'], groceries: ['shopping', 'your groceries'],
+        'grocery list': ['shopping', 'your groceries'], 'shopping list': ['shopping', 'your groceries'],
+        calendar: ['calendar', 'your calendar'], tasks: ['family', 'your tasks'],
+        requests: ['requests', 'your requests to review'], 'requests to review': ['requests', 'your requests to review'],
+        today: ['today', 'Today']
+      };
+      const destination = destinations[navigation[1].toLowerCase()];
+      return { kind: 'navigate', view: destination[0], reply: 'Opening ' + destination[1] + '.' };
+    }
+    if (/^(?:organise|organize|plan) my day$/i.test(text)) return {
+      kind: 'organise', reply: 'I’ll check your confirmed hours and saved commitments to organise your day.'
+    };
+    const shortMeal = text.match(/^(?:i|we) (?:want|would like) (.+)$/i);
+    const shortDish = shortMeal ? shortMeal[1].replace(/^(?:a|an|some)\s+/i, '') : '';
+    const clearDish = /^(?:(?:tomato|chicken|tuna|vegetable|veggie)\s+(?:pasta|spaghetti|penne)\b|(?:pasta|spaghetti|penne)\s+(?:(?:with|to)\s+)?(?:tomato(?:es)?|chicken|tuna|vegetables?)\b|(?:chicken|fish)\s+(?:and\s+)?rice\b|(?:cheese|avocado)\s+(?:on\s+)?toast\b|(?:pancakes?|omelette|omelet|porridge|pizza)\b)/i.test(shortDish)
+      && !/\b(?:packets?|packs?|bottles?|jars?|cans?|tins?|boxes|bags?|kilograms?|litres?|liters?|grams?|kg|ml)\b|\bpasta sauce\b/i.test(shortDish);
+    const meal = text.match(/^(?:i|we) (?:want|would like) to eat (.+)$/i)
+      || text.match(/^prepare(?: my| the)? (?:groceries|grocery list) for (.+)$/i)
+      || text.match(/^(?:make|cook|prepare)(?: me| us)? (.+?) for (?:breakfast|lunch|dinner)$/i)
+      || (clearDish ? shortMeal : null);
+    if (!meal) return null;
+    const request = meal[1].trim();
+    // Servings belong to the meal; scheduling and additional actions do not.
+    // In particular, do not turn "remind me" or "buy" into an approved draft.
+    if (!request || /[;]|\b(?:buy|order|purchase|pay|checkout|book|appointment|remind|reminder|notify|send|message|email|text|call|connect|access|read|delete|cancel)\b/i.test(request)) return null;
+    if (/\b(?:open|show|add|plan|organise|organize|make|cook|prepare|set)\b/i.test(request)) return null;
+    if (/\b(?:today|tomorrow|tonight|next|every|each|daily|weekly|weekdays?|weekends?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:at|before|after|around|by)\s+(?:\d|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|noon\b|midnight\b)|\b\d{1,2}:\d{2}\b|\b\d+\s*(?:am|pm)\b|\bo['’]?clock\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/i.test(request)) return null;
+    if (/\b(?:at|before|after|around|by|until|during|january|february|march|april|may|june|july|august|september|october|november|december)\b|\bin\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\s+(?:minutes?|hours?|days?|weeks?)\b/i.test(request)) return null;
+    // The menu catalogue supports no beans. Other dietary restrictions need
+    // the established clarification path, not an unchecked recipe substitution.
+    const dietary = request.replace(/\b(?:no|without|avoid|exclude|excluding) beans?\b/gi, '');
+    if (/\b(?:no|without|avoid|exclude|excluding|allerg\w*|intoleran\w*|coeliac|celiac|gluten|dairy|vegan|vegetarian|keto|halal|kosher|lactose|diabetic|nut[ -]?free|low[ -]?(?:carb|sodium|salt|sugar))\b/i.test(dietary)) return null;
+    return { kind: 'meal', request, reply: 'I’ll prepare an editable ingredient draft for you to review. No order will be placed.' };
+  }
+
+  const api = Object.freeze({ parse, planClarification, resolveClarification, routeRequest });
   root.TidyAssistant = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

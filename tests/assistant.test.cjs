@@ -833,3 +833,104 @@ test('unknown intents, time zones, conflicting dates and protected actions requi
     assert.equal(assistant.resolveClarification(result, 'yes', compactOptions).kind, 'clarify', text);
   }
 });
+
+test('standalone Ask Tidy screen commands route only to existing local destinations', () => {
+  const commands = new Map([
+    ['open my menu', 'meals'], ['show me the menu', 'meals'],
+    ['show groceries', 'shopping'], ['open my grocery list', 'shopping'],
+    ['Please show me my shopping list!', 'shopping'], ['show my calendar please.', 'calendar'],
+    ['OPEN MY TASKS', 'family'], ['show requests', 'requests'],
+    ['open requests to review', 'requests'], ['show today?', 'today']
+  ]);
+  for (const [text, view] of commands) {
+    const result = assistant.routeRequest(text);
+    assert.equal(result.kind, 'navigate', text);
+    assert.equal(result.view, view, text);
+    assert.match(result.reply, /^Opening /, text);
+    assert.equal(result.action, undefined, text);
+    assert.equal(result.draft, undefined, text);
+  }
+  assert.deepEqual(assistant.routeRequest('  ＯＰＥＮ   my MENU!  '), assistant.routeRequest('open my menu'));
+});
+
+test('day organisation is an explicit standalone command and never a scheduled save', () => {
+  for (const text of ['Organise my day', 'organize my day please', 'Please plan my day.']) {
+    assert.deepEqual(assistant.routeRequest(text), {
+      kind: 'organise', reply: 'I’ll check your confirmed hours and saved commitments to organise your day.'
+    }, text);
+  }
+  for (const text of ['plan my day tomorrow', 'organise my day at 7', 'plan my day and buy milk',
+    'Remind me to plan my day tomorrow at 7 pm', 'Add task: plan my day', 'Please help me plan my day']) {
+    assert.equal(assistant.routeRequest(text), null, text);
+  }
+  assert.equal(parse('Remind me to plan my day tomorrow at 7 pm').kind, 'task', 'existing reminder parser is unchanged');
+});
+
+test('explicit simple meal commands retain dish wording, quantities and supported no-beans requests', () => {
+  for (const [text, request] of [
+    ['I want to eat tomato pasta', 'tomato pasta'],
+    ['I want tomato pasta', 'tomato pasta'],
+    ['We would like some chicken and rice for 2', 'some chicken and rice for 2'],
+    ['I want spaghetti with tomato', 'spaghetti with tomato'],
+    ['I want pancakes', 'pancakes'],
+    ['We would like to eat chicken and rice for 2 people.', 'chicken and rice for 2 people'],
+    ['Please make spaghetti with tomato for dinner!', 'spaghetti with tomato'],
+    ['Cook us chicken and rice for lunch', 'chicken and rice'],
+    ['prepare my groceries for tomato pasta for four people', 'tomato pasta for four people'],
+    ['prepare the grocery list for tomato pasta for dinner', 'tomato pasta for dinner'],
+    ['I want to eat tomato pasta without beans', 'tomato pasta without beans']
+  ]) {
+    const result = assistant.routeRequest(text);
+    assert.equal(result.kind, 'meal', text);
+    assert.equal(result.request, request, text);
+    assert.match(result.reply, /editable ingredient draft/, text);
+    assert.match(result.reply, /No order/, text);
+    assert.equal(result.action, undefined, text);
+  }
+  assert.equal(assistant.routeRequest('I want to eat a dish Tidy does not recognise').kind, 'meal',
+    'the meal helper can offer supported recipe choices without losing the original request');
+});
+
+test('meal routing leaves scheduling, unsupported dietary changes and multiple actions for clarification', () => {
+  for (const text of [
+    'I want to eat tomato pasta tomorrow', 'I want to eat tomato pasta at 7 pm',
+    'I want to eat tomato pasta at seven', 'I want to eat tomato pasta after noon',
+    'I want to eat tomato pasta on Friday', 'I want to eat tomato pasta on 2026-10-23',
+    'I want to eat tomato pasta on 23/10', 'I want to eat tomato pasta every day',
+    'I want to eat tomato pasta in two hours', 'I want to eat tomato pasta after bedtime',
+    'I want to eat tomato pasta on October 23',
+    'I want to eat gluten free tomato pasta', 'make tomato pasta without cheese for dinner',
+    'I want to eat a vegan pizza', 'I want to eat tomato pasta, then buy ketchup',
+    'I want to eat tomato pasta and I need to add milk', 'I want to eat tomato pasta and set an alarm',
+    'prepare groceries for tomato pasta and book a clinic appointment',
+    'I want to eat tomato pasta; send a message to Mum', 'I want to eat tomato pasta and open my calendar'
+  ]) assert.equal(assistant.routeRequest(text), null, text);
+});
+
+test('screen and meal routes cannot replace grocery capture, external actions or account access', () => {
+  for (const text of ['milk', 'tomato pasta', 'We need ketchup', 'Get me groceries at 7 o’clock',
+    'Buy tomato pasta', 'Book a dentist appointment', 'Send a message to school',
+    'Appointment: dentist tomorrow at 6 pm', 'Read my Gmail', 'open Google Calendar',
+    'show my calendar and delete everything', 'open https://example.com', 'open javascript:alert(1)',
+    'open __proto__', 'show constructor', 'I want to eat tomato pasta from https://example.com',
+    'I want milk', 'I want spaghetti', 'I want milk for pancakes',
+    'I want tomato pasta sauce', 'I want tomato pasta in 2 jars', 'I want tomato pasta and buy milk']) {
+    assert.equal(assistant.routeRequest(text), null, text);
+  }
+  for (const text of ['Buy tomato pasta', 'Book a dentist appointment', 'Send a message to school']) {
+    assert.equal(parse(text).kind, 'action', text);
+    assert.equal(parse(text).action.status, 'needs_review', text);
+  }
+  assert.equal(parse('We need ketchup').kind, 'grocery');
+});
+
+test('command routing rejects hostile or oversized input without invoking objects or producing markup', () => {
+  let accessed = false;
+  const object = { toString() { accessed = true; throw Error('not text'); } };
+  for (const value of [null, undefined, 7, [], {}, object, '', '   ', 'x'.repeat(1001),
+    'open my calendar\nshow my tasks', 'show my tasks\u0000', 'I want to eat <script>alert(1)</script>']) {
+    assert.equal(assistant.routeRequest(value), null);
+  }
+  assert.equal(accessed, false);
+  assert.equal(assistant.routeRequest('I want to eat ' + 'a'.repeat(987)), null, 'length cap applies before parsing');
+});

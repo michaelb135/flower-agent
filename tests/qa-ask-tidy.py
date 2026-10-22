@@ -529,6 +529,8 @@ def main():
             tab.locator('#view-tools [data-go="appointments"]').click()
             assert_destination(tab, "appointments")
             tab.locator('[data-view="calendar"]').click()
+            if tab.locator("#calendar-onboarding-dialog").is_visible():
+                tab.locator("#calendar-onboarding-later").click()
             tab.locator('#view-calendar [data-go="reminders"]').click()
             assert_destination(tab, "reminders")
             assert saved(tab)["tasks"] == [task]
@@ -575,17 +577,17 @@ def main():
             reminder_task, = saved(tab)["tasks"]
             assert reminder_task["remindAt"] is not None and reminder_task["dueTime"] == "18:00"
             tab.locator('[data-view="assistant"]').click()
-            tab.get_by_role("button", name="Add an appointment", exact=True).click()
+            tab.get_by_role("button", name="We need ketchup", exact=True).click()
             tab.locator('#capture-form button[type="submit"]').click()
             wait_result(tab, "done")
-            assert_destination(tab, "appointments")
-            appointment_tasks = [task for task in saved(tab)["tasks"] if task["type"] == "appointment"]
-            appointment_task, = appointment_tasks
-            assert appointment_task["title"] == "dentist" and appointment_task["dueTime"] == "18:00"
+            assert_destination(tab, "shopping")
+            grocery_tasks = [task for task in saved(tab)["tasks"] if task["type"] == "grocery"]
+            grocery_task, = grocery_tasks
+            assert grocery_task["title"] == "ketchup" and grocery_task["status"] == "open"
             assert not saved(tab)["actions"]
-            return {"reminderExampleSavesReminder": True, "appointmentExampleSavesRecord": True}
+            return {"reminderExampleSavesReminder": True, "groceryExampleSavesListItem": True}
 
-        run("Displayed reminder and appointment example buttons execute their advertised local actions", example_buttons)
+        run("Displayed reminder and grocery example buttons execute their advertised local actions", example_buttons)
 
         browser.close()
 

@@ -25,7 +25,7 @@ DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 HUB_PAGES = ["meals", "shopping", "family", "reminders", "stores", "appointments", "routines",
              "household", "requests", "health", "inbox", "upcoming",
              "calendar", "planning", "planning-settings"]
-NAV_PAGES = ["today", "assistant", "family", "meals", "shopping", "calendar"]
+NAV_PAGES = ["assistant", "today", "family", "meals", "shopping", "calendar"]
 NAV_PARENT = {"planning": "today", "tools": "today", "requests": "assistant",
               "routines": "family", "inbox": "family", "household": "family",
               "stores": "shopping", "appointments": "calendar", "reminders": "calendar",
@@ -68,6 +68,11 @@ def state(tab):
     return tab.evaluate("TidyDemo.getState()")
 
 
+def skip_calendar_intro(tab):
+    if tab.locator("#calendar-onboarding-dialog").is_visible():
+        tab.locator("#calendar-onboarding-later").click()
+
+
 def directory(tab):
     tab.locator('#open-settings').click()
     tab.locator('#settings-dialog [data-go="tools"]').click()
@@ -77,6 +82,8 @@ def directory(tab):
 def section(tab, name):
     if name in NAV_PAGES:
         tab.locator(f'.app-nav [data-view="{name}"]').click()
+        if name == "calendar":
+            skip_calendar_intro(tab)
     elif name in {"household", "planning-settings", "tools"}:
         tab.locator('#open-settings').click()
         tab.locator(f'#settings-dialog [data-go="{name}"]').click()
@@ -91,6 +98,8 @@ def section(tab, name):
 
 
 def destination(tab, name):
+    if name == "calendar":
+        skip_calendar_intro(tab)
     assert tab.locator("section.view:visible").count() == 1
     assert tab.locator("section.view:visible").get_attribute("id") == "view-" + name
     assert tab.url.split("#", 1)[1].split("/", 1)[0] == name, tab.url
@@ -263,7 +272,7 @@ def main():
         def focused_navigation(context):
             tab = page(context)
             before = state(tab)
-            destination(tab, "today")
+            destination(tab, "assistant")
             assert tab.locator(".app-nav [data-view]").count() == len(NAV_PAGES)
             assert tab.locator(".app-nav [data-view]").evaluate_all("nodes=>nodes.map(node=>node.dataset.view)") == NAV_PAGES
             assert tab.locator(".app-nav").get_attribute("aria-label") == "Main navigation"
@@ -305,36 +314,36 @@ def main():
         def phone_navigation(context):
             tab = page(context)
             before = state(tab)
-            destination(tab, "today")
+            destination(tab, "assistant")
             grid = navigation_grid(tab, columns=3, rows=2)
             width = tab.viewport_size["width"]
             tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
 
             # This is navigation, rather than an ARIA tablist: arrow keys move
             # focus to a section name and Enter activates that actual page.
-            tab.locator('.app-nav [data-view="today"]').focus()
+            tab.locator('.app-nav [data-view="assistant"]').focus()
             tab.keyboard.press("ArrowRight")
-            assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
-            destination(tab, "today")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            destination(tab, "assistant")
             tab.keyboard.press("End")
             assert tab.locator('.app-nav [data-view="calendar"]').evaluate("node=>node===document.activeElement")
             navigation_item_visible(tab, "calendar")
-            destination(tab, "today")
+            destination(tab, "assistant")
             tab.keyboard.press("Enter")
             destination(tab, "calendar")
             assert tab.locator("#calendar-title").evaluate("node=>node===document.activeElement")
             tab.locator('.app-nav [data-view="calendar"]').focus()
             tab.keyboard.press("Home")
-            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             destination(tab, "calendar")
             tab.keyboard.press("Enter")
-            destination(tab, "today")
-            tab.locator('.app-nav [data-view="today"]').focus()
+            destination(tab, "assistant")
+            tab.locator('.app-nav [data-view="assistant"]').focus()
             tab.keyboard.press("ArrowDown")
             assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
-            destination(tab, "today")
+            destination(tab, "assistant")
             tab.keyboard.press("ArrowUp")
-            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowDown")
             tab.keyboard.press("Enter")
             destination(tab, "meals")
@@ -371,17 +380,17 @@ def main():
             tab = page(context)
             before = state(tab)
             grid = navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
-            tab.locator('.app-nav [data-view="today"]').focus()
+            tab.locator('.app-nav [data-view="assistant"]').focus()
             tab.keyboard.press("ArrowDown")
             assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
-            destination(tab, "today")
+            destination(tab, "assistant")
             tab.keyboard.press("ArrowUp")
-            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowDown")
             tab.keyboard.press("Enter")
             destination(tab, "meals")
             assert tab.locator("#view-meals h1").evaluate("node=>node===document.activeElement")
-            tab.locator('.app-nav [data-view="today"]').click()
+            tab.locator('.app-nav [data-view="assistant"]').click()
             tab.evaluate("scrollTo(0,0)")
             navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
             width = tab.viewport_size["width"]
@@ -411,7 +420,7 @@ def main():
                 assert tab.url == current_url
                 assert state(tab) == before
                 assert saved(tab) == before_saved
-                tab.locator('.app-nav [data-view="today"]').focus()
+                tab.locator('.app-nav [data-view="assistant"]').focus()
                 tab.keyboard.press("ArrowDown")
                 target = NAV_PAGES[columns]
                 assert tab.locator(f'.app-nav [data-view="{target}"]').evaluate("node=>node===document.activeElement")
@@ -487,7 +496,7 @@ def main():
         def home_directory(context):
             tab = page(context)
             before = state(tab)
-            destination(tab, "today")
+            destination(tab, "assistant")
             directory(tab)
             destination(tab, "tools")
             assert tab.locator("#tools-title").inner_text() == "All sections"
@@ -500,18 +509,18 @@ def main():
                 section(tab, name)
                 assert tab.locator(f"#view-{name} h1").inner_text() == heading
                 tab.locator(".brand").click()
-                destination(tab, "today")
+                destination(tab, "assistant")
             tab.locator('[data-view="today"]').click()
             assert tab.locator(".today-shortcuts button").count() == 1
             assert tab.locator("#today-meals").count() == 0
             assert tab.locator("#today-reminders").count() == 0
             assert tab.locator("#today-appointments").count() == 0
             assert state(tab) == before
-            return {"todayFirst": True, "directoryUnderSettings": True, "groupedDestinations": 15, "primarySections": 6,
+            return {"askTidyFirst": True, "directoryUnderSettings": True, "groupedDestinations": 15, "primarySections": 6,
                     "menuAndGroceriesDistinct": True, "navigationDoesNotModifyData": True,
                     "todayShortcuts": 1}
 
-        run("Optional Settings directory groups sections while Today remains the starting page", home_directory)
+        run("Optional Settings directory groups sections while Ask Tidy remains the starting page", home_directory)
 
         def direct_groceries(context):
             tab = page(context)
@@ -692,18 +701,18 @@ def main():
             tab.wait_for_function("!document.getElementById('view-appointments').hidden")
             destination(tab, "appointments")
             tab.evaluate("location.hash='unrecognised-section'")
-            tab.wait_for_function("!document.getElementById('view-today').hidden")
-            destination(tab, "today")
+            tab.wait_for_function("!document.getElementById('view-assistant').hidden")
+            destination(tab, "assistant")
             assert state(tab) == before
             return {"browserBackAndForward": True, "mealSlideRestored": True,
-                    "reloadAndHashChange": True, "unknownSectionReturnsToday": True,
+                    "reloadAndHashChange": True, "unknownSectionReturnsAskTidy": True,
                     "savedDataUnchanged": True}
 
         run("Browser navigation and deep links restore the correct section without editing saved data", navigation_history)
 
         def phone_organisation(context):
             tab = page(context)
-            destination(tab, "today")
+            destination(tab, "assistant")
             directory(tab)
             destination(tab, "tools")
             assert_no_overflow(tab, "#view-tools")
@@ -726,7 +735,7 @@ def main():
             submit_plan(tab, "breakfast")
             assert saved(tab)["mealPlans"]["breakfast"]["Monday"] == "Toast and eggs"
             tab.locator(".brand").click()
-            destination(tab, "today")
+            destination(tab, "assistant")
             for name in HUB_PAGES:
                 section(tab, name)
                 assert_no_overflow(tab, "#view-" + name)

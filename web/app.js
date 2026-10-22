@@ -7,7 +7,7 @@
   // complete. They are application identifiers, never client secrets.
   const DEFAULT_CONNECTION_CONFIG=Object.freeze({googleClientId:'',microsoftClientId:''});
   const $=id=>document.getElementById(id);
-  const ui={view:'today',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
+  const ui={view:'assistant',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,pendingCapture:null,undoCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
@@ -83,13 +83,14 @@
   }
   function showView(view,focus=true,replace=false){
     const parts=view.split('/');view=parts[0];if(view==='meals'&&MEAL_SLIDES.includes(parts[1]))ui.mealSlide=parts[1];
-    if(!Object.prototype.hasOwnProperty.call(NAV_PARENT,view))view='today';
+    if(!Object.prototype.hasOwnProperty.call(NAV_PARENT,view))view='assistant';
     if(ui.listening&&view!=='assistant')ui.voice?.abort();
     ui.view=view;for(const section of document.querySelectorAll('.view'))section.hidden=section.id!=='view-'+view;
     for(const nav of document.querySelectorAll('[data-view]')){if(nav.dataset.view===NAV_PARENT[view])nav.setAttribute('aria-current','page');else nav.removeAttribute('aria-current');}
     const route='#'+view+(view==='meals'?'/'+ui.mealSlide:'');
     if(location.hash!==route)history[replace?'replaceState':'pushState'](null,'',route);renderAll();
     if(focus){const heading=$('view-'+view).querySelector('h1');heading.focus();window.scrollTo({top:0,behavior:'instant'});}
+    if(view==='calendar')showCalendarWelcome();
   }
   function populatePeople(select,first='All household',firstValue='all'){
     const selected=select.value;select.replaceChildren();const option=el('option',first);option.value=firstValue;select.append(option);
@@ -133,6 +134,18 @@
     const times=new Map();for(const task of visible.filter(task=>task.dueDate===date&&task.dueTime)){times.set(task.dueTime,(times.get(task.dueTime)||0)+1);}
     $('today-conflicts').textContent=[...times].filter(([,count])=>count>1).map(([time,count])=>`${count} items share ${time}; check their timing.`).join(' ');
     const meal=ui.mealVerified?state.mealSummary.find(meal=>meal.day===weekday(date)):null;$('today-meal').replaceChildren(el('p',meal?meal.name:'No approved dinner plan for today.'));if(meal)$('today-meal').append(el('p','From your approved weekday menu.','helper'));
+  }
+  function renderAssistantOverview(){
+    const date=C.today(),open=state.tasks.filter(task=>task.status==='open'),due=open.filter(task=>task.dueDate===date).length,overdue=open.filter(task=>task.dueDate&&task.dueDate<date).length,groceries=open.filter(task=>task.type==='grocery').length,reviews=state.actions.filter(action=>action.status==='needs_review').length;
+    const summary=$('assistant-overview-summary');
+    Object.assign(summary.dataset,{dueToday:String(due),overdue:String(overdue),groceries:String(groceries),requests:String(reviews)});
+    summary.textContent=due+' due today · '+overdue+' overdue · '+groceries+' household grocery '+(groceries===1?'request':'requests')+' · '+reviews+' '+(reviews===1?'request':'requests')+' to review.';
+    const items=$('assistant-overview-items');items.replaceChildren();
+    for(const task of sorted(open.filter(task=>task.dueDate&&task.dueDate<=date)).slice(0,3)){
+      const row=el('li');row.dataset.taskId=task.id;row.append(el('strong',task.title),el('span',(task.dueDate<date?'Overdue · '+prettyDate(task.dueDate):'Today')+(task.dueTime?' · '+task.dueTime:''),'helper'));items.append(row);
+    }
+    if(!items.children.length)items.append(el('li','Nothing dated needs attention. Tell Tidy what you would like to do next.','helper'));
+    $('assistant-review-requests').textContent='Requests to review'+(reviews?' ('+reviews+')':'');
   }
   function renderFamily(){
     $('member-list').replaceChildren();for(const member of state.members){const assigned=state.tasks.filter(task=>task.status==='open'&&task.assigneeId===member.id).length;$('member-list').append(button(`${member.name} · ${assigned} open`,()=>openMember(member),'member-button'));}
@@ -252,7 +265,7 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();ui.quickMenu?.render();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();renderAssistantOverview();ui.quickMenu?.render();
   }
   function planningProfile(){return state.planningProfile||P.defaults();}
   function beginPlanningEdit(){if(!ui.planningEditing){ui.planningEditing=true;ui.planningBaseline=copy(planningProfile());}}
@@ -420,7 +433,7 @@
         C.updateTask(candidate,task.id,{dueDate:proposal.date,dueTime:proposal.time,remindAt:C.dueEpoch(proposal.date,proposal.time),durationMinutes:proposal.durationMinutes,planningReason:proposal.reason});count++;
       }
       let saved=true;if(count){state=candidate;saved=save();}renderAll();
-      ui.activity.status=saved?'done':'error';ui.activity.title=count?'Your day plan is ready':'Your day needs a little attention';ui.activity.reply=saved?'I’ve scheduled '+count+' flexible tasks for '+prettyDate(date)+'. '+(ui.planResults.size?ui.planResults.size+' tasks could not fit and are still waiting for a time. ':'')+'Fixed appointments stayed in place. Keep Tidy open for reminders.':'I planned '+count+' tasks in this tab, but could not save them. Please download a backup before closing.';
+      ui.activity.view='planning';ui.activity.status=saved?'done':'error';ui.activity.title=count?'Your day plan is ready':'Your day needs a little attention';ui.activity.reply=saved?'I’ve scheduled '+count+' flexible tasks for '+prettyDate(date)+'. '+(ui.planResults.size?ui.planResults.size+' tasks could not fit and are still waiting for a time. ':'')+'Fixed appointments stayed in place. Keep Tidy open for reminders.':'I planned '+count+' tasks in this tab, but could not save them. Please download a backup before closing.';
       ui.activity.message='Based on confirmed family hours, saved Tidy items'+(state.calendar?' and the imported calendar snapshot.':'. No external calendar is connected.');ui.activity.resume=()=>showView('planning');ui.activity.resumeLabel='Show my day plan';activityStep(0,'done');activityStep(1,saved?'done':'error',saved?'Checked and saved your plan':'Local saving failed');activityStep(2,'done','Opened your day plan');showView('planning');renderActivity();
     }catch(problem){ui.activity.status='error';ui.activity.title='Your plan needs attention';ui.activity.reply='I couldn’t organise that day. '+problem.message;ui.activity.message='Your existing tasks and commitments have not been rescheduled.';renderActivity();}
     finally{ui.captureBusy=false;$('planning-run').disabled=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;renderActivity();}
@@ -573,8 +586,42 @@
     if(result.reminderRequested||result.appointmentRequested||draft.type==='appointment'){ui.activity.view=draft.type==='appointment'?'appointments':'reminders';showView(ui.activity.view);resume();}
     renderActivity();
   }
+  function finishPreparedMeal(result){
+    if(!ui.activity?.menuFlow||ui.activity.status!=='waiting')return;
+    ui.activity.menuFlow=false;ui.activity.status=result.saved?'done':'error';ui.activity.title=result.saved?'Meal ingredients prepared':'Meal draft kept in this tab';ui.activity.reply=result.saved?'Your ingredient draft for '+result.name+' is ready in Menu. Review and confirm it before shopping. No order has been placed.':'Your ingredient draft is kept in this tab but could not be saved. Download a backup before closing. No order has been placed.';ui.activity.message=ui.activity.reply;activityStep(1,result.saved?'done':'error',result.saved?'Prepared an editable ingredient draft':'Local saving failed');activityStep(2,'done','Opened Menu for review');response(ui.activity.reply);
+  }
+  async function runAssistantCommand(command){
+    ui.pendingCapture=null;$('assistant-clarify-dialog').close();
+    if(command.kind==='organise'){
+      if(refreshSavedData())renderAll();$('planning-date').value=C.today();
+      if(!planningProfile().enabled){
+        startActivity();ui.activity.view='planning-settings';ui.activity.status='waiting';ui.activity.title='Confirm your usual hours once';ui.activity.reply='I can fit tasks around your work and family time. First, confirm your usual hours and enable planning.';ui.activity.message='No tasks have been rescheduled. After setup, ask me to organise your day again.';ui.activity.resume=()=>showView('planning-settings');ui.activity.resumeLabel='Set up my usual hours';activityStep(0,'done');activityStep(1,'working','Waiting for your usual hours');activityStep(2,'done','Opened planning setup');response(ui.activity.reply);showView('planning-settings');return;
+      }
+      await organiseDay();return;
+    }
+    ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
+    try{
+      ui.activity.reply=command.reply;await paintActivity();if(refreshSavedData())renderAll();activityStep(0,'done');
+      if(command.kind==='navigate'){
+        ui.activity.view=command.view;ui.activity.status='done';ui.activity.title='Here it is';ui.activity.reply=command.reply;ui.activity.message='Showing your saved Tidy information. Nothing was added or changed.';activityStep(1,'done','Read your saved information');showView(command.view);activityStep(2,'done','Opened the requested section');response(ui.activity.reply);return;
+      }
+      ui.activity.view='meals';ui.activity.menuFlow=true;ui.activity.reply='Of course—I’m preparing the ingredients for your meal.';activityStep(1,'working','Preparing ingredients');showView('meals');await paintActivity();
+      const result=ui.quickMenu.prepareFromAssistant(command.request);
+      ui.activity.resume=()=>showView('meals');ui.activity.resumeLabel='Review my meal';
+      if(result.status==='prepared'){
+        ui.activity.menuFlow=false;
+        ui.activity.status=result.saved?'done':'error';ui.activity.title=result.saved?'Meal ingredients prepared':'Meal draft kept in this tab';ui.activity.reply=result.saved?'I’ve filled in the ingredients and amounts for '+result.name+'. Review and confirm your shopping draft. No order has been placed.':'I prepared the ingredients in this tab, but could not save them. Download a backup before closing Tidy. No order has been placed.';activityStep(1,result.saved?'done':'error',result.saved?'Prepared an editable ingredient draft':'Local saving failed');
+      }else{
+        ui.activity.status=result.status==='error'?'error':'waiting';ui.activity.title=result.status==='replacement'?'Review before replacing your meal':result.status==='choices'?'Choose a simple recipe':result.status==='blocked'?'Your unfinished meal is kept':'Meal needs attention';ui.activity.reply=result.status==='replacement'?'Your current meal and groceries are still kept. Review the new meal in Menu before choosing whether to replace them.':result.message;activityStep(1,result.status==='error'?'error':'working',result.status==='replacement'?'Waiting for your replacement choice':result.status==='choices'?'Waiting for a recipe choice':'Review the meal entry');
+      }
+      ui.activity.message=ui.activity.reply;activityStep(2,'done','Opened Menu for review');response(ui.activity.reply);
+    }catch(problem){ui.activity.status='error';ui.activity.title='This request needs attention';ui.activity.reply=problem.message;ui.activity.message='Check the details before trying again.';const step=ui.activity.steps.find(step=>step.status==='working');if(step)step.status='error';renderActivity();}
+    finally{ui.captureBusy=false;document.querySelector('#capture-form button[type="submit"]').disabled=false;$('capture-form').removeAttribute('aria-busy');renderActivity();}
+  }
   async function capture(text,suppliedResult=null){
-    if(ui.captureBusy)return;ui.pendingCapture=null;$('assistant-clarify-dialog').close();ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
+    if(ui.captureBusy)return;
+    const command=suppliedResult?null:A.routeRequest(text);if(command){await runAssistantCommand(command);return;}
+    ui.pendingCapture=null;$('assistant-clarify-dialog').close();ui.captureBusy=true;document.querySelector('#capture-form button[type="submit"]').disabled=true;$('capture-form').setAttribute('aria-busy','true');startActivity();
     try{
       await paintActivity();if(refreshSavedData())renderAll();
       const result=suppliedResult||A.parse(text,clarificationOptions(text));ui.activity.assumptions=result.assumptions||[];response(result.message);activityStep(0,'done');
@@ -835,7 +882,7 @@
     $(type+'-form').addEventListener('submit',event=>saveMealPlan(event,type));
     for(const day of MEAL_DAYS){const input=$(type+'-'+day.toLowerCase());input.addEventListener('focus',()=>beginMealPlanEdit(type));input.addEventListener('input',()=>{beginMealPlanEdit(type);ui.mealStatuses[type]='Your changes have not been saved yet.';error(type+'-error','');renderMealPlans();});}
   }
-  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('today');});
+  document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('assistant');});
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
@@ -899,11 +946,10 @@
   $('meals-frame').addEventListener('load',()=>{ui.mealReady=true;trackMealEdits();postMealRestore();});
   window.addEventListener('storage',event=>{if(event.key!==KEY&&event.key!==null)return;try{if(refreshSavedData()){renderAll();toast('Saved data updated from another tab on this browser.');}}catch(_){storageWarning('Another tab saved data that could not be read. Your current data remains available.');}});
   window.addEventListener('focus',checkReminders);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders();});
-  window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'today',true,true));
-  ui.quickMenu=window.TidyQuickMenuUI.create({getState:()=>state,mutate:(work,message)=>mutate(()=>work(state),message),getSaved:()=>!ui.saveFailed&&!ui.storageLocked&&!ui.mealConflict,openWebsite,showView,onChanged:renderAll});
-  setupVoice();showView(location.hash.slice(1)||'today',false,true);setInterval(checkReminders,15000);checkReminders();
+  window.addEventListener('hashchange',()=>showView(location.hash.slice(1)||'assistant',true,true));
+  ui.quickMenu=window.TidyQuickMenuUI.create({getState:()=>state,mutate:(work,message)=>mutate(()=>work(state),message),getSaved:()=>!ui.saveFailed&&!ui.storageLocked&&!ui.mealConflict,openWebsite,showView,onChanged:renderAll,onPrepared:finishPreparedMeal});
+  setupVoice();showView(location.hash.slice(1)||'assistant',false,true);setInterval(checkReminders,15000);checkReminders();
   window.TidyDemo=Object.freeze({getState:()=>C.validateSnapshot(state),checkReminders});
   // The iframe may finish loading before the parent registers its listeners.
   postMealRestore();
-  showCalendarWelcome();
 })();

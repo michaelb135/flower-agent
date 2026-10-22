@@ -241,7 +241,12 @@
         fields.title.focus();
         byId('quick-menu-replacement').hidden = true;
         pending = null;
-      } else requestDirty = oldDirty;
+        const prepared = { status: 'prepared', name: result.draft.name, draftId: result.draft.id, saved: options.getSaved() };
+        if (options.onPrepared) options.onPrepared(prepared);
+        return prepared;
+      }
+      requestDirty = oldDirty;
+      return { status: 'error', message: fields.error.textContent };
     }
     function prepare(recipeId, recipeName) {
       error('');
@@ -253,7 +258,7 @@
           people: Number(fields.people.value), preferences: (loaded || current(options.getState())).preferences,
           ...(recipeId ? { recipeId } : {})
         });
-      } catch (problem) { error(problem.message); return; }
+      } catch (problem) { error(problem.message); return { status: 'error', message: problem.message }; }
       fields.choices.replaceChildren();
       fields.choices.hidden = result.ok;
       if (!result.ok) {
@@ -268,16 +273,29 @@
           button.addEventListener('click', () => prepare(choice.id, [choice.name, explicitShape, explicitPeople].filter(Boolean).join(' ')));
           fields.choices.append(button);
         });
-        refreshMessages(); return;
+        refreshMessages(); return { status: 'choices', message: result.reason };
       }
       if (loaded && loaded.draft) {
         pending = { result, baseline: clone(loaded) };
         byId('quick-menu-replacement-message').textContent = 'Replace your current ' + loaded.draft.name.toLowerCase() + ' draft with ' + result.draft.name.toLowerCase() + '? The current meal list will be removed from Groceries. You can view and download it first.';
         byId('quick-menu-replacement').hidden = false;
         byId('quick-menu-replace').focus();
-        return;
+        return { status: 'replacement', name: result.draft.name };
       }
-      acceptPrepared(result);
+      return acceptPrepared(result);
+    }
+
+    function prepareFromAssistant(request) {
+      if (typeof request !== 'string' || !request.trim() || request.length > 1000) return { status: 'error', message: 'Name a simple dish to prepare its groceries.' };
+      render();
+      if (reviewDirty || conflict || pending || requestDirty && fields.request.value.trim() && fields.request.value.trim() !== request.trim()) {
+        const message = 'Your unfinished meal entry is still here. Review it in Menu before starting another meal.';
+        error(message);
+        return { status: 'blocked', message };
+      }
+      fields.request.value = request.trim();
+      requestDirty = true;
+      return prepare();
     }
 
     fields.form.addEventListener('submit', event => { event.preventDefault(); prepare(); });
@@ -322,6 +340,7 @@
     });
     byId('quick-menu-keep').addEventListener('click', () => {
       pending = null; byId('quick-menu-replacement').hidden = true;
+      if (loaded && loaded.draft) { fields.request.value = loaded.draft.request; fields.people.value = loaded.draft.people; requestDirty = false; }
       notice = 'Your current meal and groceries were kept.'; refreshMessages();
     });
     byId('quick-menu-view-current').addEventListener('click', () => options.showView('shopping'));
@@ -339,7 +358,7 @@
     byId('quick-menu-kibsons').addEventListener('click', () => options.openWebsite('https://www.kibsons.com/', 'Kibsons'));
     byId('quick-menu-waitrose').addEventListener('click', () => options.openWebsite('https://www.waitrose.ae/', 'Waitrose UAE'));
 
-    return { render, getApprovedItems: approvedItems, shoppingText };
+    return { render, getApprovedItems: approvedItems, shoppingText, prepareFromAssistant };
   }
 
   root.TidyQuickMenuUI = Object.freeze({ create });

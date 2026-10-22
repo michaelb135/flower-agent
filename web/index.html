@@ -5,20 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#265b49">
   <title>Tidy · Your day, in one place</title>
-  <link rel="stylesheet" href="styles.css?v=20261021-six">
+  <link rel="stylesheet" href="styles.css?v=20261022-ask">
   <script defer src="menu-helper.js"></script>
   <script defer src="core.js"></script>
-  <script defer src="assistant.js"></script>
+  <script defer src="assistant.js?v=20261022-ask"></script>
   <script defer src="calendar.js"></script>
   <script defer src="planner.js"></script>
   <script defer src="calendar-connect.js"></script>
-  <script defer src="menu-ui.js"></script>
-  <script defer src="app.js?v=20261021-six"></script>
+  <script defer src="menu-ui.js?v=20261022-ask"></script>
+  <script defer src="app.js?v=20261022-ask"></script>
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#today" aria-label="Tidy today"><span class="logo" aria-hidden="true">t</span><span>tidy<small>your family helper</small></span></a>
+      <a class="brand" href="#assistant" aria-label="Ask Tidy"><span class="logo" aria-hidden="true">t</span><span>tidy<small>your family helper</small></span></a>
       <div class="top-actions"><span class="save-indicator" id="save-status" role="status">Opening saved data…</span><button class="icon-button" id="open-settings" aria-label="Settings and backups">Settings</button></div>
     </header>
     <div class="demo-note"><strong>Tidy web app.</strong> Tasks and meals save on this browser when storage is available. Calendar accounts need connection setup. Tidy data does not sync with other phones, and retailer services are not connected.</div>
@@ -26,8 +26,8 @@
     <div class="notice-bar" id="alert-banner" role="status" hidden><div id="alert-content"></div><button class="button small secondary" id="dismiss-alert">Dismiss</button></div>
     <div class="navigation-shell">
       <nav class="app-nav" id="main-navigation" aria-label="Main navigation">
-        <button type="button" data-view="today" aria-current="page"><span aria-hidden="true">☀</span>Today</button>
-        <button type="button" data-view="assistant"><span aria-hidden="true">✳</span>Ask Tidy</button>
+        <button type="button" data-view="assistant" aria-current="page"><span aria-hidden="true">✳</span>Ask Tidy</button>
+        <button type="button" data-view="today"><span aria-hidden="true">☀</span>Today</button>
         <button type="button" data-view="family"><span aria-hidden="true">✓</span>Tasks</button>
         <button type="button" data-view="meals"><span aria-hidden="true">◒</span>Menu</button>
         <button type="button" data-view="shopping"><span aria-hidden="true">≡</span>Groceries</button>
@@ -42,21 +42,23 @@
         <p id="assistant-activity-message" class="helper"></p>
         <div class="assistant-activity-actions"><button type="button" class="button secondary small" id="assistant-activity-open" hidden>Show me</button><button type="button" class="button secondary small" id="assistant-activity-edit" hidden>Edit details</button><button type="button" class="button secondary small" id="assistant-activity-undo" hidden>Undo</button><button type="button" class="button text small" id="assistant-activity-dismiss">Dismiss</button></div>
       </section>
-      <section class="view" id="view-today" aria-labelledby="today-title">
+      <section class="view" id="view-today" aria-labelledby="today-title" hidden>
         <div class="page-heading"><div><p class="eyebrow" id="today-date"></p><h1 id="today-title" tabindex="-1">Today</h1><p class="intro">Focus on what needs doing today.</p></div><button type="button" class="button" id="today-add">+ Add something</button></div>
         <div class="stats" id="today-stats"></div>
         <section class="card"><div class="section-heading"><h2>What needs attention</h2><label class="compact-field">Show<select id="today-person" aria-label="Whose tasks to show today"></select></label></div><div id="today-conflicts" class="helper"></div><div id="today-tasks" class="task-list"></div></section>
         <nav class="today-shortcuts" aria-label="More ways to organise"><button type="button" class="button secondary small" data-go="planning">My day plan</button></nav>
       </section>
-<section class="view" id="view-assistant" aria-labelledby="assistant-title" hidden>
-        <p class="eyebrow">Tell me what's on your mind</p><h1 id="assistant-title" tabindex="-1">One place to ask.</h1><p class="intro">Tell Tidy what you need in one message. Clear requests save straight away. Tidy uses your confirmed usual hours to help plan tasks and asks one quick question when an essential detail is missing.</p>
-        <section class="card assistant-card"><div class="assistant-greeting"><span class="assistant-icon" aria-hidden="true">✳</span><div><h2>How can I help?</h2><p class="helper">Tidy understands simple requests using rules. An AI service is not connected.</p></div></div>
-          <form id="capture-form"><label for="capture-text">Type a request</label><textarea id="capture-text" rows="3" maxlength="1000" required placeholder="Remind me to call the clinic tomorrow at 3 pm"></textarea><div class="capture-actions"><button type="button" class="button secondary" id="voice-button">Speak a request</button><button class="button" type="submit">Tell Tidy →</button></div></form><p id="voice-status" class="helper" role="status"></p>
-          <div class="example-requests"><button data-example="Notify me to call the clinic tomorrow at 6 pm">Remind me at 6 pm</button><button data-example="Appointment: dentist tomorrow at 6 pm">Add an appointment</button><button data-example="We need ketchup">We need ketchup</button><button data-example="Dad: take out bins tomorrow">Give someone a task</button><button data-example="What do I need to do today?">What's on today?</button></div>
-          <div class="assistant-response" id="assistant-response" role="status" hidden></div><div id="assistant-followup"></div>
-        </section>
-        <nav class="section-shortcuts" id="assistant-related" aria-label="Ask Tidy tools"><button type="button" class="button secondary small" data-go="requests">Requests to review</button></nav>
-        <section class="card"><h2>You stay in control.</h2><p>Tasks and list items can be saved immediately. Purchases, bookings and messages become drafts for review. They are never sent or paid for by this demo.</p><p class="helper">Appointments you enter are your records; Tidy does not check that a provider has confirmed them.</p></section>
+<section class="view assistant-home" id="view-assistant" aria-labelledby="assistant-title">
+        <p class="eyebrow">Your everyday starting point</p><h1 id="assistant-title" tabindex="-1">Ask Tidy</h1><p class="intro">Tell Tidy once. Review what it prepares, then carry on with your day.</p>
+        <div class="assistant-home-layout">
+          <section class="card assistant-card"><div class="assistant-greeting"><span class="assistant-icon" aria-hidden="true">✳</span><div><h2>What can I help with?</h2><p class="helper">Type or speak a request. I’ll show you the result and ask when an essential detail is missing.</p></div></div>
+            <form id="capture-form"><label for="capture-text">What do you need?</label><textarea id="capture-text" rows="4" maxlength="1000" required placeholder="Remind me to call the clinic tomorrow at 3 pm"></textarea><div class="capture-actions"><button type="button" class="button secondary" id="voice-button">Speak a request</button><button class="button" type="submit">Ask Tidy →</button></div></form><p id="voice-status" class="helper" role="status"></p>
+            <div class="example-requests" aria-label="Try a request"><button type="button" data-example="I want to eat tomato pasta">Plan a meal</button><button type="button" data-example="Organise my day">Plan my day</button><button type="button" data-example="We need ketchup">We need ketchup</button><button type="button" data-example="Notify me to call the clinic tomorrow at 6 pm">Remind me at 6 pm</button></div>
+            <div class="assistant-response" id="assistant-response" role="status" hidden></div><div id="assistant-followup"></div>
+          </section>
+          <section class="card assistant-overview" id="assistant-overview" aria-labelledby="assistant-overview-title"><p class="eyebrow">Already in Tidy</p><h2 id="assistant-overview-title">Your day at a glance</h2><p id="assistant-overview-summary" class="helper" role="status" aria-live="polite"></p><ul id="assistant-overview-items" class="assistant-overview-items"></ul><div class="actions left"><button type="button" class="button secondary small" id="assistant-view-today" data-go="today">Open Today</button></div><nav class="section-shortcuts" id="assistant-related" aria-label="Ask Tidy tools"><button type="button" class="button text small" id="assistant-review-requests" data-go="requests">Requests to review</button></nav></section>
+        </div>
+        <section class="assistant-control-note" aria-label="What Tidy can do"><p class="helper">Tidy uses your saved details and simple request rules to prepare tasks, reminders and meal groceries. Purchases, bookings and messages still need your review and a separate confirmation with the provider.</p></section>
       </section>
       <section class="view" id="view-family" aria-labelledby="family-title" hidden>
 

@@ -62,6 +62,8 @@ def section(tab, name):
     tab.locator("#open-settings").click()
     tab.locator('#settings-dialog [data-go="tools"]').click()
     tab.locator(f'#view-tools [data-go="{name}"]').click()
+    if name == "calendar":
+        skip_intro(tab)
     assert tab.locator("section.view:visible").count() == 1
     assert tab.locator("#view-" + name).is_visible()
 
@@ -225,6 +227,9 @@ def main():
         def introduction(context):
             tab = page(context)
             dialog = tab.locator("#calendar-onboarding-dialog")
+            assert not dialog.is_visible()
+            assert tab.locator("#view-assistant").is_visible()
+            tab.locator('[data-view="calendar"]').click()
             assert dialog.is_visible()
             text = dialog.inner_text()
             assert re.search(r"(?:cannot|can.t) read.*(?:phone|device).*calendar.*directly", text, re.I), text
@@ -243,10 +248,12 @@ def main():
             return {"accountSetupOrFileImportExplained": True, "noDirectDeviceAccessClaim": True,
                     "providerPermissionReviewed": True, "skipPersists": True, "setUpLaterAvailable": True}
 
-        run("First opening explains account setup or file access honestly and Not now persists", introduction)
+        run("Opening Calendar explains account setup in context and Not now persists without blocking Ask Tidy", introduction)
 
         def introduction_accept(context):
             tab = page(context)
+            assert not tab.locator("#calendar-onboarding-dialog").is_visible()
+            tab.locator('[data-view="calendar"]').click()
             tab.locator("#calendar-onboarding-start").click()
             assert tab.locator("#view-calendar").is_visible()
             assert not tab.locator("#calendar-onboarding-dialog").is_visible()
@@ -529,6 +536,9 @@ def main():
         def phone_layout(context):
             tab = page(context)
             dialog = tab.locator("#calendar-onboarding-dialog")
+            assert not dialog.is_visible()
+            assert tab.locator("#view-assistant").is_visible()
+            tab.locator('[data-view="calendar"]').click()
             assert dialog.is_visible()
             assert_no_overflow(tab, "#calendar-onboarding-dialog")
             tab.locator("#calendar-onboarding-later").focus()
