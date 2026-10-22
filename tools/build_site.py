@@ -21,7 +21,7 @@ if output == source or source in output.parents or output == repo or output in s
 output.mkdir(parents=True, exist_ok=True)
 if any(output.iterdir()):
     raise SystemExit('Build output must be an empty directory.')
-names = ['index.html', 'styles.css', 'app.js', 'core.js', 'menu-helper.js', 'menu-ui.js', 'assistant.js', 'calendar.js', 'planner.js', 'meals.html', 'calendar-connect.js', 'calendar-auth.html', 'calendar-auth.js', 'vendor/msal-browser.min.js', 'vendor/msal-redirect-bridge.min.js', 'vendor/msal-LICENSE.txt']
+names = ['index.html', 'styles.css', 'app.js', 'core.js', 'history.js', 'menu-helper.js', 'menu-ui.js', 'assistant.js', 'calendar.js', 'planner.js', 'meals.html', 'calendar-connect.js', 'calendar-auth.html', 'calendar-auth.js', 'vendor/msal-browser.min.js', 'vendor/msal-redirect-bridge.min.js', 'vendor/msal-LICENSE.txt']
 hashes = {}
 for name in names:
     original = source / name

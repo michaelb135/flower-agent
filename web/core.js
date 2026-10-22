@@ -230,6 +230,18 @@
     if (!helper || typeof helper.validateState !== 'function') fail('Menu helper is unavailable. Reload Tidy before opening this menu data.');
     return helper.validateState(value);
   }
+  function historyModel() {
+    // Existing backups remain readable without history or a history script.
+    // An explicit history field must be validated rather than silently lost.
+    const helper = typeof module !== 'undefined' && module.exports
+      ? require('./history.js')
+      : root.TidyHistory;
+    if (!helper || typeof helper.validateHistory !== 'function') fail('Activity history is unavailable. Reload Tidy before opening this history data.');
+    return helper;
+  }
+  function cleanActivityHistory(value) {
+    return historyModel().validateHistory(value);
+  }
   function cleanPlanningProfile(value) {
     object(value, 'Family routine');
     const result = { enabled: bool(value.enabled, false, 'Automatic planning'), workDays: list(value.workDays, 7, 'Work days').map(day => integer(day, 0, 6, 'Work day')), schoolDays: list(value.schoolDays === undefined ? value.workDays : value.schoolDays, 7, 'School days').map(day => integer(day, 0, 6, 'School day')) };
@@ -296,10 +308,40 @@
     // optional until someone saves one, rather than expanding every old state.
     if (data.mealPlans !== undefined) result.mealPlans = cleanMealPlans(data.mealPlans);
     if (data.menuHelper !== undefined) result.menuHelper = cleanMenuHelper(data.menuHelper);
+    if (data.activityHistory !== undefined) result.activityHistory = cleanActivityHistory(data.activityHistory);
     if (data.planningProfile !== undefined) result.planningProfile = cleanPlanningProfile(data.planningProfile);
     if (data.calendar !== undefined) result.calendar = cleanCalendar(data.calendar);
     if (bytes(JSON.stringify(result)) > BACKUP_LIMIT) fail('Backup exceeds the 1 MiB limit.');
     return result;
+  }
+  function validateChangeSnapshot(data) {
+    object(data, 'State');
+    if (data.activityHistory === undefined) return validateSnapshot(data);
+    const helper = historyModel();
+    const history = helper.validateHistory(data.activityHistory);
+    // Editing business data may reclaim the oldest optional history entries.
+    // Imports and persisted snapshots still use the strict validator above.
+    const business = validateSnapshot({ ...data, activityHistory: undefined });
+    const baseSize = bytes(JSON.stringify(business)) + bytes(',"activityHistory":');
+    const fits = value => baseSize + bytes(JSON.stringify(value)) <= BACKUP_LIMIT;
+    if (fits(history)) return validateSnapshot({ ...business, activityHistory: history });
+    let best = helper.trim(history, history.entries.length);
+    if (!fits(best)) {
+      const problem = new Error('Activity history cannot fit beside the saved data. The backup is full; export a backup before adding more history.');
+      problem.code = 'TIDY_HISTORY_FULL';
+      throw problem;
+    }
+    let low = 1, high = history.entries.length;
+    while (low <= high) {
+      const count = Math.floor((low + high) / 2);
+      const trimmed = helper.trim(history, count);
+      if (fits(trimmed)) { best = trimmed; high = count - 1; }
+      else low = count + 1;
+    }
+    return validateSnapshot({ ...business, activityHistory: best });
+  }
+  function applyChangedHistory(state, candidate) {
+    if (candidate.activityHistory !== undefined) state.activityHistory = candidate.activityHistory;
   }
   function updateMealPlan(state, type, values) {
     object(state, 'State');
@@ -308,8 +350,9 @@
     // Validate the whole candidate before assigning anything: an invalid name
     // or a full backup must leave all existing responsibilities recoverable.
     const mealPlans = cleanMealPlans({ ...(state.mealPlans === undefined ? {} : cleanMealPlans(state.mealPlans)), [type]: values });
-    const candidate = validateSnapshot({ ...state, mealPlans });
+    const candidate = validateChangeSnapshot({ ...state, mealPlans });
     state.mealPlans = candidate.mealPlans;
+    applyChangedHistory(state, candidate);
     return state.mealPlans[type];
   }
   function stateMembers(state) {
@@ -333,8 +376,9 @@
     if (state.members.some(item => item.name.trim().toLowerCase() === member.name.toLowerCase())) fail('That household name already exists. Choose a different name so assignments are clear.');
     // Existing or imported duplicate names remain readable. Uniqueness applies
     // only to adding a new name, and the whole candidate is checked first.
-    validateSnapshot({ ...state, members: [...state.members, member] });
+    const candidate = validateChangeSnapshot({ ...state, members: [...state.members, member] });
     state.members.push(member);
+    applyChangedHistory(state, candidate);
     return member;
   }
   function createTask(state, input, now = Date.now()) {
@@ -346,8 +390,9 @@
     // A valid but oversized in-memory edit would also be impossible to export.
     // Validate the whole candidate before committing; storage failures are handled
     // separately by persist and can still leave recoverable edits in the tab.
-    validateSnapshot({ ...state, tasks: [...state.tasks, task] });
+    const candidate = validateChangeSnapshot({ ...state, tasks: [...state.tasks, task] });
     state.tasks.push(task);
+    applyChangedHistory(state, candidate);
     return task;
   }
   function updateTask(state, id, patch, now = Date.now()) {
@@ -363,8 +408,9 @@
     const reminderChanged = Object.prototype.hasOwnProperty.call(patch, 'remindAt') && patch.remindAt !== task.remindAt;
     if ((scheduleChanged || reminderChanged) && !Object.prototype.hasOwnProperty.call(patch, 'deliveredReminderAt')) next.deliveredReminderAt = null;
     const cleaned = cleanTask(next, stateMembers(state));
-    validateSnapshot({ ...state, tasks: state.tasks.map(item => item === task ? cleaned : item) });
+    const candidate = validateChangeSnapshot({ ...state, tasks: state.tasks.map(item => item === task ? cleaned : item) });
     Object.assign(task, cleaned);
+    applyChangedHistory(state, candidate);
     return task;
   }
   function nextDate(task, now) {
@@ -402,16 +448,18 @@
     if (task.repeat !== 'none') completed.seriesId = seriesId;
     const tasks = state.tasks.map(item => item === task ? completed : item);
     if (upcoming) tasks.push(upcoming);
-    validateSnapshot({ ...state, tasks });
+    const candidate = validateChangeSnapshot({ ...state, tasks });
     Object.assign(task, completed);
     if (upcoming) state.tasks.push(upcoming);
+    applyChangedHistory(state, candidate);
     return task;
   }
   function reopenTask(state, id, now = Date.now()) {
     const task = findTask(state, id); epoch(now, 'current time');
     const reopened = { ...task, status: 'open', completedAt: null };
-    validateSnapshot({ ...state, tasks: state.tasks.map(item => item === task ? reopened : item) });
+    const candidate = validateChangeSnapshot({ ...state, tasks: state.tasks.map(item => item === task ? reopened : item) });
     Object.assign(task, reopened);
+    applyChangedHistory(state, candidate);
     // An existing future occurrence stays intact; completing again deduplicates it.
     return task;
   }
@@ -420,10 +468,11 @@
     const seriesId = task.seriesId || task.id;
     const belongsToSeries = item => item.id === seriesId || item.id === task.id || item.seriesId === seriesId;
     const tasks = state.tasks.map(item => belongsToSeries(item) ? { ...item, repeat: 'none' } : item);
-    validateSnapshot({ ...state, tasks });
+    const candidate = validateChangeSnapshot({ ...state, tasks });
     // Historical occurrences must also stop: reopening an old completed item
     // must not silently start the stopped routine again.
     for (const item of state.tasks) if (belongsToSeries(item)) item.repeat = 'none';
+    applyChangedHistory(state, candidate);
     return task;
   }
   function deleteTask(state, id) {
@@ -478,7 +527,7 @@
     return parseBackup(text);
   }
 
-  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createMember, createTask, updateTask, completeTask, reopenTask, stopRepeating, deleteTask, dueReminders, updateMealPlan, validateSnapshot, backupJSON, parseBackup, persist, persistIfUnchanged, load });
+  const api = Object.freeze({ defaults, today, addDays, dueEpoch, createMember, createTask, updateTask, completeTask, reopenTask, stopRepeating, deleteTask, dueReminders, updateMealPlan, validateSnapshot, validateChangeSnapshot, backupJSON, parseBackup, persist, persistIfUnchanged, load });
   root.TidyCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -1,7 +1,7 @@
 /* UI for Tidy's web app. Provider actions remain manual drafts. */
 (function () {
   'use strict';
-  const C=window.TidyCore, A=window.TidyAssistant, P=window.TidyPlanner, CAL=window.TidyCalendar, CC=window.TidyCalendarConnect, KEY='tidy.app.v1', WELCOME_KEY='tidy.calendar-welcome.v1', CONNECTION_KEY='tidy.calendar-connection-config.v1';
+  const H=window.TidyHistory, C=window.TidyCore, A=window.TidyAssistant, P=window.TidyPlanner, CAL=window.TidyCalendar, CC=window.TidyCalendarConnect, KEY='tidy.app.v1', WELCOME_KEY='tidy.calendar-welcome.v1', CONNECTION_KEY='tidy.calendar-connection-config.v1';
   const GROCERY_STORES=Object.freeze({Carrefour:{name:'Carrefour UAE',url:'https://www.carrefouruae.com/'},Waitrose:{name:'Waitrose UAE',url:'https://www.waitrose.ae/'},Kibsons:{name:'Kibsons',url:'https://www.kibsons.com/'}});
   // Public registration IDs can be deployed here once the provider setup is
   // complete. They are application identifiers, never client secrets.
@@ -10,6 +10,7 @@
   const ui={view:'assistant',editingTask:null,editingAction:null,editingMember:null,taskBaseline:null,actionBaseline:null,memberBaseline:null,settingsBaseline:null,healthSquareBaseline:null,healthSquareEditing:false,healthSquareStatus:'',lastDraft:null,storage:null,storageBaseline:null,storageLocked:false,recoveryText:null,saveFailed:false,voice:null,listening:false,mealReady:false,mealVerified:false,mealGroceries:[],groceriesApproved:false,mealRequests:new Map(),mealBaseSnapshot:null,savedMealSnapshot:null,savedMealSummary:[],mealRestoreExpected:null,mealRestorePending:false,mealDirty:false,mealConflict:false,mealDocument:null,unsavedDeliveries:new Set(),unsavedCheckin:'',websiteUrl:null};
   let state=C.defaults(), toastTimer;
   Object.assign(ui,{captureBusy:false,activity:null,taskCapture:null,pendingCapture:null,undoCapture:null,highlightTaskId:null,highlightActionId:null,mealSlide:'breakfast',mealEdits:{breakfast:null,lunch:null},mealBaselines:{breakfast:null,lunch:null},mealStatuses:{breakfast:'',lunch:''}});
+  Object.assign(ui,{historyBaseline:null,historyPending:null,historyExtras:[],historyLimit:20,historyRestore:false,historyIssue:''});
   const MEAL_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday'],MEAL_SLIDES=['breakfast','lunch','dinner'];
   const NAV_PARENT=Object.freeze({today:'today',planning:'today',tools:'today',assistant:'assistant',requests:'assistant',family:'family',routines:'family',inbox:'family',household:'family',meals:'meals',shopping:'shopping',stores:'shopping',calendar:'calendar',appointments:'calendar',reminders:'calendar',upcoming:'calendar',health:'calendar','planning-settings':'calendar'});
   Object.assign(ui,{planningEditing:false,planningBaseline:null,planningStatus:'',planResults:new Map(),calendarImportBusy:false,welcomeChoice:null});
@@ -32,11 +33,41 @@
   function copy(value){return JSON.parse(JSON.stringify(value));}
   function same(a,b){return JSON.stringify(a)===JSON.stringify(b);}
   function mealConflictWarning(){storageWarning('A different meal draft was saved in another tab. Your current meal edits are kept here and have not replaced it. Download a backup before closing; restore a backup to choose which version to keep.');}
+  // Pending history is a complete log. Re-merging a saved prefix would bring
+  // back deliberately expired entries and count them as removed again.
+  function currentHistory(){return ui.historyPending||state.activityHistory||H.emptyHistory();}
+  function queueHistory(section,title,details,route){ui.historyExtras.push({id:id('change'),at:Date.now(),section,title,details,route});}
+  function historyBaseline(){return copy(ui.historyPending?{...state,activityHistory:ui.historyPending}:state);}
+  function stageHistory(){
+    const after=ui.historyPending&&!ui.historyRestore?{...state,activityHistory:ui.historyPending}:state;
+    let next=H.append(ui.historyBaseline||state,after,{now:Date.now(),mergeHistories:ui.historyRestore});
+    if(ui.historyExtras.length){const base=next||H.emptyHistory(),entries=[...base.entries,...ui.historyExtras],dropped=Math.max(0,entries.length-500);next=H.validateHistory({version:1,entries:entries.slice(dropped),olderCount:base.olderCount+dropped});}
+    if(next){
+      try{state=C.validateChangeSnapshot({...state,activityHistory:next});ui.historyPending=null;ui.historyIssue='';}
+      catch(problem){if(problem.code!=='TIDY_HISTORY_FULL')throw problem;ui.historyPending=next;ui.historyIssue='The saved data is full. Some history is kept in this tab only; download history before closing.';}
+    }
+    ui.historyExtras=[];ui.historyRestore=false;ui.historyBaseline=historyBaseline();
+  }
+  function renderHistory(){
+    const history=currentHistory(),target=$('assistant-history-list'),unsaved=!!ui.historyPending||ui.saveFailed||ui.storageLocked||ui.mealConflict;
+    target.replaceChildren();const entries=history.entries.slice().reverse();
+    for(const entry of entries.slice(0,ui.historyLimit)){
+      const row=el('li');row.dataset.historyId=entry.id;row.dataset.section=entry.section;row.append(el('h3',entry.title));
+      const meta=el('div',undefined,'history-meta'),time=el('time',readableTime(entry.at));time.dateTime=new Date(entry.at).toISOString();meta.append(el('span',entry.section),time);row.append(meta);
+      if(entry.details)row.append(el('p',entry.details,'helper'));
+      row.append(button('Open '+entry.section,()=>showView(entry.route),'button text small'));target.append(row);
+    }
+    if(!entries.length)target.append(el('li','Your new changes will appear here. Changes made before this update were not recorded.','helper'));
+    const status=(entries.length?entries.length+' recorded '+(entries.length===1?'change':'changes')+'. ':'')+(unsaved?'Not saved on this browser; changes are kept in this tab only. ':'History is saved on this browser and included in Tidy backups. ')+(history.olderCount?history.olderCount+' older changes are no longer kept here. ':'')+'Keeps up to the latest 500 changes.';
+    $('assistant-history-status').textContent=(ui.historyIssue?ui.historyIssue+' ':'')+status;
+    $('assistant-history-more').hidden=entries.length<=ui.historyLimit;$('assistant-history-download').disabled=!entries.length;
+  }
   function save(){
-    if(ui.storageLocked){storageWarning('Existing saved data could not be read. It has been preserved. New changes stay in this tab until you restore a valid backup; download a backup before closing.');return false;}
-    if(ui.mealConflict){mealConflictWarning();return false;}
-    try{ui.storageBaseline=C.persistIfUnchanged(ui.storage,state,ui.storageBaseline,KEY);ui.savedMealSnapshot=copy(state.mealSnapshot);ui.savedMealSummary=copy(state.mealSummary);ui.saveFailed=false;storageWarning('');return true;}
-    catch(problem){ui.saveFailed=true;storageWarning(problem.message+' Changes stay in this tab; download a backup before closing.');return false;}
+    try{stageHistory();}catch(problem){ui.historyIssue='History could not be updated: '+problem.message;}
+    if(ui.storageLocked){storageWarning('Existing saved data could not be read. It has been preserved. New changes stay in this tab until you restore a valid backup; download a backup before closing.');renderHistory();return false;}
+    if(ui.mealConflict){mealConflictWarning();renderHistory();return false;}
+    try{ui.storageBaseline=C.persistIfUnchanged(ui.storage,state,ui.storageBaseline,KEY);ui.savedMealSnapshot=copy(state.mealSnapshot);ui.savedMealSummary=copy(state.mealSummary);ui.saveFailed=false;storageWarning('');renderHistory();return true;}
+    catch(problem){ui.saveFailed=true;storageWarning(problem.message+' Changes stay in this tab; download a backup before closing.');renderHistory();return false;}
   }
   function startStorage(){
     try{ui.storage=window.localStorage;ui.storageBaseline=ui.storage.getItem(KEY);state=ui.storageBaseline===null?C.defaults():C.parseBackup(ui.storageBaseline);ui.savedMealSnapshot=copy(state.mealSnapshot);ui.savedMealSummary=copy(state.mealSummary);storageWarning('');}
@@ -55,13 +86,13 @@
     let latest;
     try{latest=C.parseBackup(raw);}catch(_){ui.storageLocked=true;ui.saveFailed=true;if(ui.recoveryText===null)ui.recoveryText=raw;storageWarning('Another tab saved data that could not be read. Your current data and the unreadable saved copy have been kept; download backups before closing.');return false;}
     ui.savedMealSnapshot=copy(latest.mealSnapshot);ui.savedMealSummary=copy(latest.mealSummary);
-    if(ui.storageLocked||ui.saveFailed||ui.mealConflict){
+    if(ui.storageLocked||ui.saveFailed||ui.mealConflict||ui.historyPending){
       if(ui.mealConflict)mealConflictWarning();
       else storageWarning('Another tab updated the saved data. Your unsaved changes are still kept in this tab; download a backup before closing or restore a backup to choose which version to keep.');
       return false;
     }
     const mealChanged=!same(state.mealSnapshot,latest.mealSnapshot);
-    state=latest;ui.storageBaseline=raw;
+    state=latest;ui.storageBaseline=raw;ui.historyBaseline=historyBaseline();
     if(restoreMeals&&mealChanged&&!ui.mealDirty)postMealRestore();
     return true;
   }
@@ -78,7 +109,7 @@
   }
   function mutate(work,message){
     let previous=C.validateSnapshot(state);
-    try{refreshSavedData();previous=C.validateSnapshot(state);work();state=C.validateSnapshot(state);const saved=save();renderAll();if(message)toast(message+(saved?'':' · not saved locally'));return true;}
+    try{refreshSavedData();previous=C.validateSnapshot(state);work();state=C.validateChangeSnapshot(state);const saved=save();renderAll();if(message)toast(message+(saved?'':' · not saved locally'));return true;}
     catch(problem){state=previous;renderAll();toast(problem.message+' The previous data was kept.');return false;}
   }
   function showView(view,focus=true,replace=false){
@@ -255,9 +286,9 @@
     event.preventDefault();error('health-square-error','');
     try{
       refreshSavedData();
-      const draft=C.validateSnapshot({...state,settings:{...state.settings,healthSquareUrl:$('health-square-url').value}}).settings;
+      const draft=C.validateChangeSnapshot({...state,settings:{...state.settings,healthSquareUrl:$('health-square-url').value}}).settings;
       const merged=mergeFields(ui.healthSquareBaseline,state.settings,draft,['healthSquareUrl']);
-      state=C.validateSnapshot({...state,settings:{...state.settings,...merged}});
+      state=C.validateChangeSnapshot({...state,settings:{...state.settings,...merged}});
       const saved=save();
       if(saved){ui.healthSquareEditing=false;ui.healthSquareStatus=state.settings.healthSquareUrl?'Health Square website saved on this browser.':'Website removed; Health Square is disabled until you save an address.';}
       else {ui.healthSquareEditing=true;ui.healthSquareStatus='Website change kept in this tab only. Download a backup before closing.';}
@@ -265,7 +296,7 @@
     }catch(problem){error('health-square-error',problem.message);ui.healthSquareStatus='Website change has not been saved.';renderHealthSquare();}
   }
   function renderAll(){
-    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();renderAssistantOverview();ui.quickMenu?.render();
+    populatePeople($('today-person'));populatePeople($('person-filter'));renderToday();renderFamily();renderRoutines();renderActions();renderShopping();renderHealthSquare();renderReminders();renderAppointments();renderMealPlans();renderPlanningProfile();renderCalendar();renderDayPlan();renderActivity();renderAssistantOverview();renderHistory();ui.quickMenu?.render();
   }
   function planningProfile(){return state.planningProfile||P.defaults();}
   function beginPlanningEdit(){if(!ui.planningEditing){ui.planningEditing=true;ui.planningBaseline=copy(planningProfile());}}
@@ -285,7 +316,7 @@
     try{
       refreshSavedData();const draft={enabled:$('planning-enabled').checked,workDays:[...document.querySelectorAll('[name="planning-workday"]:checked')].map(box=>Number(box.value)).sort(),schoolDays:[...document.querySelectorAll('[name="planning-schoolday"]:checked')].map(box=>Number(box.value)).sort()};
       for(const [field,suffix] of Object.entries(PROFILE_INPUTS))draft[field]=field.endsWith('Minutes')?Number($('planning-'+suffix).value):$('planning-'+suffix).value;
-      const profile=mergeFields(ui.planningBaseline||planningProfile(),planningProfile(),draft,PROFILE_FIELDS),candidate=C.validateSnapshot({...state,planningProfile:profile});
+      const profile=mergeFields(ui.planningBaseline||planningProfile(),planningProfile(),draft,PROFILE_FIELDS),candidate=C.validateChangeSnapshot({...state,planningProfile:profile});
       state=candidate;const saved=save();
       if(saved){ui.planningEditing=false;ui.planningStatus=profile.enabled?'Your hours are saved. Ask Tidy to plan a flexible task, or use Organise my day.':'Your hours are saved. Automatic planning is switched off.';}
       else {ui.planningEditing=true;ui.planningBaseline=copy(state.planningProfile);ui.planningStatus='Your hours are kept in this tab only; download a backup before closing.';}
@@ -337,7 +368,7 @@
     try{
       const config={googleClientId:$('calendar-google-client-id').value.trim(),microsoftClientId:$('calendar-microsoft-client-id').value.trim()},connector=newConnector(config);
       const raw=window.localStorage.getItem(CONNECTION_KEY);if(raw!==ui.connectionConfigBaseline)throw Error('Connection settings changed in another tab. Reload before replacing them; your entered IDs are still here.');
-      const encoded=JSON.stringify(config);window.localStorage.setItem(CONNECTION_KEY,encoded);
+      const encoded=JSON.stringify(config);window.localStorage.setItem(CONNECTION_KEY,encoded);if(raw!==encoded){queueHistory('Calendar','Updated calendar connection settings','Changed public connection settings; this does not connect an account.','calendar');save();}
       const old=ui.connector;ui.connector=connector;ui.connectionConfig=config;ui.connectionConfigBaseline=encoded;ui.connectionConfigEditing=false;ui.connectionConfigStatus='Public connection settings saved on this browser. Provider registration must match the addresses shown above.';ui.accountProvider=null;ui.accountMessage='';renderCalendarConnection();
       for(const provider of ['google','microsoft'])try{await old.disconnect(provider);}catch(_){}
     }catch(problem){error('calendar-config-error',problem.message||'The connection settings could not be saved.');}
@@ -352,7 +383,7 @@
       const snapshot=await (refresh?connector.refresh(provider):connector.connect(provider));
       if(ui.connector!==connector)throw Error('Connection settings changed while signing in. Try again with the current settings.');
       refreshSavedData();if(!same(baseline,state.calendar??null))throw Error('Another tab changed your saved calendar. Its events were kept; review them before connecting again.');
-      const candidate=C.validateSnapshot({...state,calendar:snapshot});
+      const candidate=C.validateChangeSnapshot({...state,calendar:snapshot});
       if(state.calendar&&state.calendar.sourceType!==provider&&!confirm('Use '+snapshot.sourceName+' for planning instead of the currently saved calendar? Tidy uses one account source or file snapshot at a time. Your tasks will stay in place.')){await connector.disconnect(provider);ui.accountMessage='Your previous calendar snapshot was kept.';return;}
       const previousProvider=ui.accountProvider;state=candidate;const saved=save();ui.accountProvider=provider;
       ui.accountMessage=(saved?'Calendar events read and saved on this browser.':'Events were read but could not be saved; they remain in this tab only. Download a backup before closing.')+' Planning now uses '+snapshot.sourceName+'. Refresh when your calendar changes.';
@@ -376,7 +407,7 @@
       if(file.size>1024*1024)throw Error('Choose a calendar file smaller than 1 MiB.');
       const imported=CAL.parseICS(await file.text(),{now:Date.now(),horizonDays:60,timeZone:'Asia/Dubai'});
       refreshSavedData();if(!same(baseline,state.calendar??null))throw Error('Another tab changed the imported calendar. Your current calendar was kept; review it before importing again.');
-      const candidate=C.validateSnapshot({...state,calendar:{...imported,sourceName:file.name.slice(0,120)||'Calendar.ics'}});
+      const candidate=C.validateChangeSnapshot({...state,calendar:{...imported,sourceName:file.name.slice(0,120)||'Calendar.ics'}});
       if(state.calendar&&!confirm('Replace the imported calendar snapshot with '+candidate.calendar.events.length+' commitments from this file? Your Tidy tasks will stay in place.'))return;
       state=candidate;const saved=save();if(ui.accountProvider)await disconnectCalendarAccount();ui.accountMessage='';renderAll();toast(saved?'Calendar snapshot imported':'Calendar kept in this tab only; download a backup');
     }catch(problem){error('calendar-error',problem.message+' The previous calendar and tasks were kept.');}
@@ -568,8 +599,8 @@
       if(refreshSavedData())renderAll();const receipt=ui.undoCapture,current=state.tasks.find(task=>task.id===receipt.id);
       if(!current||!same(current,receipt.baseline))throw Error('This item changed after I added it. I kept the latest version; use Edit details to review it.');
       if(ui.storageLocked||ui.mealConflict)throw Error('Undo could not be saved safely. Your item is kept; download a backup before changing it.');
-      const previous=C.validateSnapshot(state);C.deleteTask(state,receipt.id);
-      if(!save()){state=previous;renderAll();throw Error('Undo could not be saved. Your item is kept in this tab; download a backup before closing.');}
+      const previous=C.validateSnapshot(state),previousPending=ui.historyPending?copy(ui.historyPending):null,previousHistoryIssue=ui.historyIssue;C.deleteTask(state,receipt.id);
+      if(!save()){state=previous;ui.historyPending=previousPending;ui.historyIssue=previousHistoryIssue;ui.historyBaseline=historyBaseline();renderAll();throw Error('Undo could not be saved. Your item is kept in this tab; download a backup before closing.');}
       ui.undoCapture=null;ui.activity.target=null;ui.activity.status='done';ui.activity.title='Undone';ui.activity.reply='I’ve removed the item I just added.';ui.activity.message='Removed “'+receipt.baseline.title+'”.';ui.activity.steps=[{label:'Removed the new item',status:'done'}];response(ui.activity.message);renderAll();renderActivity();
     }catch(problem){ui.undoCapture=null;ui.activity.reply=problem.message;ui.activity.message=problem.message;response(problem.message);renderActivity();}
   }
@@ -632,7 +663,7 @@
       if(refreshSavedData())renderAll();
       if(result.kind==='action'){
         const action={id:id('request'),kind:result.action.kind,title:result.action.title,details:result.action.details||'',provider:'',link:'',status:'needs_review',createdAt:Date.now()};
-        state=C.validateSnapshot({...state,actions:[...state.actions,action]});const saved=save();renderAll();
+        state=C.validateChangeSnapshot({...state,actions:[...state.actions,action]});const saved=save();renderAll();
         ui.activity.view=action.kind==='booking'?'appointments':'requests';ui.activity.target={kind:'action',id:action.id};ui.activity.status=saved?'done':'error';ui.activity.title=saved?(action.kind==='booking'?'Appointment request ready for review':'Draft ready for review'):'Draft kept in this tab only';
         ui.activity.message='Prepared: '+action.title+'. '+(saved?'Saved on this browser.':'Not saved locally; download a backup before closing.')+' Your approval is needed. Nothing has been booked, purchased or sent.';
         ui.activity.reply=saved?'I’ve prepared your '+(action.kind==='booking'?'appointment':action.kind==='purchase'?'purchase':'message')+' request for review. Nothing has been booked, purchased or sent.':'I’ve prepared your request in this tab, but I couldn’t save it. Please download a backup before closing. Nothing has been booked, purchased or sent.';
@@ -712,7 +743,7 @@
       let draft={kind:$('action-kind').value,title:$('action-title').value,provider:$('action-provider').value,link:$('action-link').value,details:$('action-details').value};
       if(ui.editingAction){draft=mergeFields(ui.actionBaseline,old,draft,Object.keys(draft));if(old.status!==ui.actionBaseline.status)throw Error('This request changed its approval status in another tab. Your edits are still in this form; review the current request.');}
       const action={...draft,id:old?.id||id('request'),status:'needs_review',createdAt:old?.createdAt??Date.now()};
-      const candidate=C.validateSnapshot({...state,actions:old?state.actions.map(item=>item.id===old.id?action:item):[...state.actions,action]});state=candidate;const saved=save();$('action-dialog').close();renderAll();toast('Draft saved for review'+(saved?'':' · in this tab only'));
+      const candidate=C.validateChangeSnapshot({...state,actions:old?state.actions.map(item=>item.id===old.id?action:item):[...state.actions,action]});state=candidate;const saved=save();$('action-dialog').close();renderAll();toast('Draft saved for review'+(saved?'':' · in this tab only'));
     }catch(problem){error('action-error',problem.message);}
   }
   function openMember(member=null){ui.editingMember=member?.id||null;ui.memberBaseline=member?copy(member):null;$('member-name').value=member?.name||'';error('member-error','');$('member-dialog').showModal();}
@@ -723,7 +754,7 @@
       if(ui.editingMember){
         const previous=state.members.find(old=>old.id===member.id);member={...member,...mergeFields(ui.memberBaseline,previous,member,['name'])};const key=member.name.toLocaleLowerCase();
         if(key!==previous?.name.trim().toLocaleLowerCase()&&state.members.some(old=>old.id!==member.id&&old.name.trim().toLocaleLowerCase()===key))throw Error('That household name already exists. Use a different name so assignments stay clear.');
-        state=C.validateSnapshot({...state,members:state.members.map(old=>old.id===member.id?member:old)});
+        state=C.validateChangeSnapshot({...state,members:state.members.map(old=>old.id===member.id?member:old)});
       }else C.createMember(state,member);
       const saved=save();$('member-dialog').close();renderAll();toast(saved?'Household name saved':'Household name kept in this tab; download a backup');
     }catch(problem){error('member-error',problem.message);}
@@ -735,7 +766,7 @@
       if(refreshSavedData())renderAll();
       const due=C.dueReminders(state,Date.now()).filter(task=>!ui.unsavedDeliveries.has(task.id+':'+task.remindAt));let checkin=false,deliveryWarning=false;const date=C.today();
       if(ui.todayDate!==date)renderAll();
-      if(!state.settings.remindersPaused&&state.settings.checkinEnabled&&state.settings.checkinLastDate!==date&&ui.unsavedCheckin!==date&&Date.now()>=C.dueEpoch(date,state.settings.checkinTime)){checkin=true;try{state=C.validateSnapshot({...state,settings:{...state.settings,checkinLastDate:date}});}catch(_){ui.unsavedCheckin=date;deliveryWarning=true;}}
+      if(!state.settings.remindersPaused&&state.settings.checkinEnabled&&state.settings.checkinLastDate!==date&&ui.unsavedCheckin!==date&&Date.now()>=C.dueEpoch(date,state.settings.checkinTime)){checkin=true;try{state=C.validateChangeSnapshot({...state,settings:{...state.settings,checkinLastDate:date}});}catch(_){ui.unsavedCheckin=date;deliveryWarning=true;}}
       if(!due.length&&!checkin)return;
       const content=$('alert-content');content.replaceChildren(el('strong',checkin?'Ready to review your day?':'A few things need attention.'));
       if(due.length){const list=el('ul');for(const task of due){list.append(el('li',task.title+' · '+memberName(task.assigneeId)));try{C.updateTask(state,task.id,{deliveredReminderAt:task.remindAt});}catch(_){ui.unsavedDeliveries.add(task.id+':'+task.remindAt);deliveryWarning=true;}}content.append(list);}
@@ -789,7 +820,7 @@
   function acceptMealChange(message){
     const wasRestoreEcho=ui.mealRestorePending&&!ui.mealDirty;
     // Validate before accepting either a local change or a restoration echo.
-    C.validateSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});
+    C.validateChangeSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});
     refreshSavedData(false);
     const latest=ui.savedMealSnapshot;
     if(wasRestoreEcho&&(!same(latest,ui.mealRestoreExpected)&&!same(message.snapshot,latest)||ui.mealRestoreExpected!==null&&!same(message.snapshot,ui.mealRestoreExpected))){
@@ -798,9 +829,9 @@
       ui.mealRestorePending=false;postMealRestore();return;
     }
     const conflict=ui.mealConflict||!same(latest,ui.mealBaseSnapshot)&&!same(latest,message.snapshot);
-    state=C.validateSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});ui.mealVerified=true;readMealGroceries(message);
+    state=C.validateChangeSnapshot({...state,mealSnapshot:message.snapshot,mealSummary:message.summary});ui.mealVerified=true;readMealGroceries(message);
     if(conflict){
-      ui.mealDirty=true;ui.mealConflict=true;ui.saveFailed=true;ui.mealRestorePending=false;mealConflictWarning();postMeal({type:'tidy-meals-storage-status',saved:false});renderToday();renderShopping();return;
+      ui.mealDirty=true;ui.mealConflict=true;ui.saveFailed=true;ui.mealRestorePending=false;stageHistory();renderHistory();mealConflictWarning();postMeal({type:'tidy-meals-storage-status',saved:false});renderToday();renderShopping();return;
     }
     // Matching restores are acknowledgements, not new mutations. Avoid a
     // storage/restore/save echo between tabs and retain any unsaved task data.
@@ -823,7 +854,7 @@
       if(file.size>1024*1024)throw Error('The backup is too large. Maximum size is 1 MiB.');
       const candidate=C.parseBackup(await file.text());await validateMealBackup(candidate.mealSnapshot);
       if(!confirm(`Replace this browser's Tidy data with ${candidate.tasks.length} tasks and ${candidate.members.length} household names from the backup? Download a backup first if you want to keep the current data.`))return;
-      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;ui.planningEditing=false;ui.planningStatus='';ui.planResults.clear();for(const type of ['breakfast','lunch']){ui.mealEdits[type]=null;ui.mealStatuses[type]='';}const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
+      ui.storageBaseline=ui.storage?.getItem(KEY)??null;state=candidate;ui.storageLocked=false;ui.recoveryText=null;ui.mealConflict=false;ui.mealDirty=false;ui.mealVerified=false;ui.mealGroceries=[];ui.groceriesApproved=false;ui.planningEditing=false;ui.planningStatus='';ui.planResults.clear();for(const type of ['breakfast','lunch']){ui.mealEdits[type]=null;ui.mealStatuses[type]='';}ui.historyRestore=true;queueHistory('Backup','Restored a backup','Replaced Tidy data after your confirmation.','assistant');const saved=save();renderAll();if(state.mealSnapshot===null){ui.mealBaseSnapshot=null;postMeal({type:'tidy-meals-reset'});}else postMealRestore(true);
       toast('Backup restored'+(saved?'':' · in this tab only'));
     }catch(problem){error('backup-error',problem.message);}
     finally{event.target.value='';}
@@ -848,6 +879,7 @@
     mutate(()=>{for(const input of [{title:'Get the school bag ready',category:'School',assigneeId:'child',dueDate:date,priority:'high'},{title:'Check the work report',category:'Work',assigneeId:'mum',dueDate:date},{title:'Take out the bins',category:'Home',assigneeId:'dad',dueDate:date,repeat:'daily'},{title:'Call the clinic',category:'Health',assigneeId:'mum',dueDate:C.addDays(date,1),dueTime:'10:00'},{title:'Ketchup',category:'Shopping',type:'grocery',quantity:'1 bottle'}])if(!state.tasks.some(task=>task.title===input.title&&task.notes===sampleNotes))C.createTask(state,{...input,assigneeId:state.members.some(member=>member.id===input.assigneeId)?input.assigneeId:null,notes:sampleNotes});},'Example tasks added');
   }
   startStorage();
+  ui.historyBaseline=copy(state);
   startCalendarConnections();
   $('calendar-connect-google').addEventListener('click',()=>connectCalendarAccount('google'));
   $('calendar-connect-microsoft').addEventListener('click',()=>connectCalendarAccount('microsoft'));
@@ -867,8 +899,12 @@
   for(const nav of document.querySelectorAll('[data-view]'))nav.addEventListener('click',()=>showView(nav.dataset.view));
   $('main-navigation').addEventListener('keydown',event=>{
     const tabs=[...$('main-navigation').querySelectorAll('[data-view]')],index=tabs.indexOf(event.target);if(index<0)return;let next;
-    const columns=getComputedStyle($('main-navigation')).gridTemplateColumns.trim().split(/\s+/).length;
-    if(event.key==='ArrowRight')next=Math.min(tabs.length-1,index+1);else if(event.key==='ArrowLeft')next=Math.max(0,index-1);else if(event.key==='ArrowDown')next=index+columns<tabs.length?index+columns:index;else if(event.key==='ArrowUp')next=index-columns>=0?index-columns:index;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;
+    if(event.key==='ArrowRight')next=Math.min(tabs.length-1,index+1);else if(event.key==='ArrowLeft')next=Math.max(0,index-1);
+    else if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+      const current=tabs[index].getBoundingClientRect(),down=event.key==='ArrowDown';
+      if(index===0&&down)next=1;
+      else{const candidates=tabs.map((tab,i)=>({i,rect:tab.getBoundingClientRect()})).filter(item=>down?item.rect.top>current.top+1:item.rect.top<current.top-1);candidates.sort((a,b)=>Math.abs(a.rect.top-current.top)-Math.abs(b.rect.top-current.top)||Math.abs((a.rect.left+a.rect.right-current.left-current.right)/2)-Math.abs((b.rect.left+b.rect.right-current.left-current.right)/2));next=candidates[0]?.i??index;}
+    }else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;
     event.preventDefault();tabs[next].focus();
   });
   for(const link of document.querySelectorAll('[data-go]'))link.addEventListener('click',()=>{if($('settings-dialog').open&&$('settings-dialog').contains(link))$('settings-dialog').close();showView(link.dataset.go);});
@@ -883,6 +919,8 @@
     for(const day of MEAL_DAYS){const input=$(type+'-'+day.toLowerCase());input.addEventListener('focus',()=>beginMealPlanEdit(type));input.addEventListener('input',()=>{beginMealPlanEdit(type);ui.mealStatuses[type]='Your changes have not been saved yet.';error(type+'-error','');renderMealPlans();});}
   }
   document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();showView('assistant');});
+  $('assistant-history-more').addEventListener('click',()=>{ui.historyLimit+=20;renderHistory();});
+  $('assistant-history-download').addEventListener('click',()=>download('Tidy-history-'+C.today()+'.json',JSON.stringify(currentHistory(),null,2)));
   $('today-add').addEventListener('click',()=>{showView('assistant');$('capture-text').focus();});$('family-add').addEventListener('click',()=>openTask());$('tools-add-link').addEventListener('click',()=>openTask({},null,'Keep a useful website with the job it helps you finish.'));
   $('add-routine').addEventListener('click',()=>openTask({repeat:'weekly',dueDate:C.today()},null,'Choose the first date. Weekly routines keep this weekday.'));
   $('task-form').addEventListener('submit',saveTask);$('action-form').addEventListener('submit',saveAction);$('member-form').addEventListener('submit',saveMember);
@@ -912,7 +950,7 @@
   for(const field of [$('task-search'),$('category-filter'),$('person-filter'),$('status-filter')])field.addEventListener('input',renderFamily);$('today-person').addEventListener('change',renderToday);
   $('add-member').addEventListener('click',()=>openMember());$('new-action').addEventListener('click',()=>openAction());
   $('open-settings').addEventListener('click',showSettings);$('edit-checkins').addEventListener('click',showSettings);
-  $('settings-form').addEventListener('submit',event=>{event.preventDefault();try{refreshSavedData();const draft={checkinEnabled:$('checkin-enabled').checked,checkinTime:$('checkin-time').value,remindersPaused:$('alerts-paused').checked},merged=mergeFields(ui.settingsBaseline,state.settings,draft,Object.keys(draft));state=C.validateSnapshot({...state,settings:{...state.settings,...merged}});const saved=save();if(saved){ui.settingsBaseline=copy(state.settings);$('checkin-enabled').checked=state.settings.checkinEnabled;$('checkin-time').value=state.settings.checkinTime;$('alerts-paused').checked=state.settings.remindersPaused;}renderAll();toast(saved?'Alert preferences saved':'Preferences kept in this tab; download a backup');checkReminders();}catch(problem){toast(problem.message);}});
+  $('settings-form').addEventListener('submit',event=>{event.preventDefault();try{refreshSavedData();const draft={checkinEnabled:$('checkin-enabled').checked,checkinTime:$('checkin-time').value,remindersPaused:$('alerts-paused').checked},merged=mergeFields(ui.settingsBaseline,state.settings,draft,Object.keys(draft));state=C.validateChangeSnapshot({...state,settings:{...state.settings,...merged}});const saved=save();if(saved){ui.settingsBaseline=copy(state.settings);$('checkin-enabled').checked=state.settings.checkinEnabled;$('checkin-time').value=state.settings.checkinTime;$('alerts-paused').checked=state.settings.remindersPaused;}renderAll();toast(saved?'Alert preferences saved':'Preferences kept in this tab; download a backup');checkReminders();}catch(problem){toast(problem.message);}});
   $('pause-alerts').addEventListener('click',()=>{mutate(()=>{state.settings.remindersPaused=!state.settings.remindersPaused;},state.settings.remindersPaused?'Alerts resumed':'Alerts paused');checkReminders();});
   $('enable-browser-alerts').addEventListener('click',async()=>{try{await Notification.requestPermission();updateBrowserStatus();}catch(_){$('browser-alert-status').textContent='This browser could not request permission. In-page alerts still work.';}});
   $('dismiss-alert').addEventListener('click',()=>{$('alert-banner').hidden=true;});
@@ -938,7 +976,7 @@
       catch(problem){postMeal({type:'tidy-meals-storage-status',saved:false});toast(problem.message);}
     }else if(message.type==='tidy-meals-restored'){
       if(message.message==='Current edits kept.')ui.mealDirty=true;
-      ui.mealVerified=message.valid===true;if(ui.mealVerified){try{state=C.validateSnapshot({...state,mealSummary:message.summary});readMealGroceries(message);}catch(_){ui.mealVerified=false;}}if(!ui.mealVerified){ui.mealGroceries=[];ui.groceriesApproved=false;toast('The saved meal plan needs recovery. Open the meal planner to review it.');}renderToday();renderShopping();
+      ui.mealVerified=message.valid===true;if(ui.mealVerified){try{state=C.validateChangeSnapshot({...state,mealSummary:message.summary});readMealGroceries(message);}catch(_){ui.mealVerified=false;}}if(!ui.mealVerified){ui.mealGroceries=[];ui.groceriesApproved=false;toast('The saved meal plan needs recovery. Open the meal planner to review it.');}renderToday();renderShopping();
     }else if(message.type==='tidy-meals-validation-result'){
       const request=ui.mealRequests.get(message.requestId);if(!request)return;ui.mealRequests.delete(message.requestId);message.valid===true?request.resolve():request.reject(message.message);
     }

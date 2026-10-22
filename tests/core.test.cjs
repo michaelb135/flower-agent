@@ -43,6 +43,165 @@ test('classic browser scripts validate optional menu data with the shared recipe
   assert.equal(restored.draft.status, 'draft');
 });
 
+test('browser core preserves old backups without history and refuses to discard history when its helper is missing', () => {
+  const sandbox = { URL, TextEncoder, Date, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/core.js'), 'utf8'), sandbox);
+  const state = sandbox.TidyCore.defaults();
+  const original = sandbox.TidyCore.backupJSON(state);
+  assert.equal(Object.hasOwn(sandbox.TidyCore.parseBackup(original), 'activityHistory'), false);
+  assert.equal(sandbox.TidyCore.backupJSON(sandbox.TidyCore.parseBackup(original)), original);
+  state.activityHistory = { version: 1, entries: [], olderCount: 0 };
+  assert.throws(() => sandbox.TidyCore.backupJSON(state), /Activity history is unavailable/);
+  assert.equal(sandbox.TidyCore.backupJSON(sandbox.TidyCore.defaults()), original);
+});
+
+test('classic browser scripts validate and restore activity history with the shared history model loaded first', () => {
+  const sandbox = { URL, TextEncoder, Date, Math };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/history.js'), 'utf8'), sandbox);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/core.js'), 'utf8'), sandbox);
+  const result = vm.runInNewContext(`
+    const historyState = TidyCore.defaults();
+    historyState.activityHistory = { version: 1, entries: [{ id: 'browser-history', at: ${NOW}, section: 'Tasks', title: 'Added school homework', route: 'family' }], olderCount: 0 };
+    JSON.stringify(TidyCore.parseBackup(TidyCore.backupJSON(historyState)).activityHistory);
+  `, sandbox);
+  assert.deepEqual(JSON.parse(result), { version: 1, entries: [{ id: 'browser-history', at: NOW, section: 'Tasks', title: 'Added school homework', details: '', route: 'family' }], olderCount: 0 });
+});
+
+function historyFixture() {
+  return {
+    version: 1, olderCount: 12,
+    entries: [
+      { id: 'history-1', at: NOW, section: 'Tasks', title: 'Added school homework', details: 'Assigned to Mum', route: 'family' },
+      { id: 'history-2', at: NOW + 1, section: 'Groceries', title: 'Completed ketchup', details: 'Marked completed in Tidy; no purchase verified.', route: 'shopping' },
+      { id: 'history-3', at: NOW + 2, section: 'Menu', title: 'Approved meal grocery draft', details: 'No order placed.', route: 'meals' }
+    ]
+  };
+}
+
+test('activity history round-trips with saved responsibilities and is copied independently for backups and persistence', () => {
+  const state = Core.defaults();
+  task(state, { title: 'School homework', assigneeId: 'mum', notes: 'Keep the actual task notes' });
+  state.activityHistory = historyFixture();
+  const before = Core.backupJSON(state);
+  const restored = Core.parseBackup(before);
+  assert.deepEqual(restored.activityHistory, state.activityHistory);
+  assert.deepEqual(restored.tasks, state.tasks);
+  let saved = null;
+  const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; } };
+  Core.persistIfUnchanged(storage, restored, null);
+  assert.equal(saved, before);
+  const loaded = Core.load(storage);
+  assert.deepEqual(loaded.activityHistory, state.activityHistory);
+  loaded.activityHistory.entries[0].title = 'Independent restored title';
+  assert.equal(state.activityHistory.entries[0].title, 'Added school homework');
+  assert.equal(Core.backupJSON(restored), before);
+  assert.equal(Core.parseBackup(saved).activityHistory.olderCount, 12);
+});
+
+test('invalid activity history cannot replace valid saved data or silently become an empty log', () => {
+  const state = Core.defaults();
+  task(state, { title: 'Keep this saved responsibility' });
+  state.activityHistory = historyFixture();
+  const before = Core.backupJSON(state);
+  let saved = before, writes = 0;
+  const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; writes++; } };
+  const changedHistory = patch => ({ ...historyFixture(), ...patch });
+  const changedEntry = patch => changedHistory({ entries: [{ ...historyFixture().entries[0], ...patch }] });
+  const invalid = [
+    null, [], changedHistory({ version: 2 }), changedHistory({ olderCount: -1 }), changedHistory({ olderCount: 1.5 }),
+    changedHistory({ entries: Array.from({ length: 501 }, (_, index) => ({ ...historyFixture().entries[0], id: 'too-many-' + index })) }),
+    changedHistory({ entries: [historyFixture().entries[0], historyFixture().entries[0]] }),
+    changedEntry({ id: '' }), changedEntry({ at: -1 }), changedEntry({ at: 1.5 }), changedEntry({ at: Number.MAX_SAFE_INTEGER }),
+    changedEntry({ section: 'Retailer purchase confirmed' }), changedEntry({ route: 'https://example.invalid/' }),
+    changedEntry({ route: 'javascript:alert(1)' }), changedEntry({ route: 'unknown-view' }),
+    changedEntry({ title: '' }), changedEntry({ title: 'x'.repeat(361) }), changedEntry({ details: 'x'.repeat(501) })
+  ];
+  for (const history of invalid) {
+    const candidate = { ...state, activityHistory: history };
+    assert.throws(() => Core.validateSnapshot(candidate));
+    assert.throws(() => Core.parseBackup(JSON.stringify(candidate)));
+    assert.throws(() => Core.persistIfUnchanged(storage, candidate, before));
+    assert.equal(saved, before);
+    assert.equal(writes, 0);
+    assert.equal(Core.backupJSON(state), before);
+  }
+});
+
+function historyBudgetFixture(headroom = 12000) {
+  const state = Core.defaults();
+  const template = task(state, { id: 'budget-template', title: 'Existing responsibility', notes: 'a'.repeat(8000) });
+  state.tasks = Array.from({ length: 119 }, (_, index) => ({ ...template, id: 'budget-' + index }));
+  let remaining = 1024 * 1024 - headroom - Buffer.byteLength(Core.backupJSON(state));
+  assert.ok(remaining >= 0);
+  for (const item of state.tasks) {
+    const extra = Math.min(10000 - item.notes.length, remaining);
+    item.notes += 'b'.repeat(extra);
+    remaining -= extra;
+    if (!remaining) break;
+  }
+  assert.equal(remaining, 0);
+  assert.equal(Buffer.byteLength(Core.backupJSON(state)), 1024 * 1024 - headroom);
+  state.activityHistory = {
+    version: 1, olderCount: 7,
+    entries: Array.from({ length: 20 }, (_, index) => ({ id: 'budget-history-' + index, at: NOW + index,
+      section: 'Tasks', title: 'An older task change', details: 'c'.repeat(300), route: 'family' }))
+  };
+  return state;
+}
+
+test('business edits reclaim the oldest optional history while preserving all responsibilities and recent events', () => {
+  const state = historyBudgetFixture();
+  const previous = Core.parseBackup(Core.backupJSON(state));
+  const existing = state.tasks[0], existingTasks = state.tasks;
+  const created = task(state, { id: 'important-new-task', title: 'New school responsibility', notes: 'd'.repeat(8000) });
+  assert.equal(state.tasks.length, 120);
+  assert.equal(state.tasks.at(-1), created);
+  assert.equal(state.tasks, existingTasks);
+  assert.equal(state.tasks[0], existing);
+  assert.deepEqual(state.tasks.slice(0, 119), previous.tasks);
+  assert.ok(state.activityHistory.entries.length > 0 && state.activityHistory.entries.length < 20);
+  const removed = 20 - state.activityHistory.entries.length;
+  assert.deepEqual(state.activityHistory.entries, previous.activityHistory.entries.slice(removed));
+  assert.equal(state.activityHistory.olderCount, 7 + removed);
+  assert.ok(Buffer.byteLength(Core.backupJSON(state)) <= 1024 * 1024);
+  const beforeFailure = Core.backupJSON(state);
+  assert.throws(() => Core.updateTask(state, existing.id, { dueDate: '2026-02-30', notes: 'e'.repeat(10000) }, NOW));
+  assert.equal(Core.backupJSON(state), beforeFailure);
+  assert.throws(() => task(state, { id: 'cannot-fit-business', notes: 'f'.repeat(10000) }), /1 MiB/);
+  assert.equal(Core.backupJSON(state), beforeFailure);
+});
+
+test('working-change history fitting is explicit and never weakens strict backup imports', () => {
+  const oversized = historyBudgetFixture(2000);
+  const original = JSON.stringify(oversized);
+  assert.ok(Buffer.byteLength(original) > 1024 * 1024);
+  assert.throws(() => Core.validateSnapshot(oversized), /1 MiB/);
+  assert.throws(() => Core.parseBackup(original), /1 MiB/);
+  const fitted = Core.validateChangeSnapshot(oversized);
+  assert.deepEqual(fitted.tasks, oversized.tasks);
+  assert.equal(JSON.stringify(oversized), original);
+  assert.ok(fitted.activityHistory.entries.length < oversized.activityHistory.entries.length);
+  assert.equal(fitted.activityHistory.olderCount, 7 + 20 - fitted.activityHistory.entries.length);
+  const validBackup = Core.backupJSON(fitted);
+  assert.ok(Buffer.byteLength(validBackup) <= 1024 * 1024);
+  assert.deepEqual(Core.parseBackup(validBackup), fitted);
+  const businessOnly = { ...oversized };
+  delete businessOnly.activityHistory;
+  assert.equal(Object.hasOwn(Core.validateChangeSnapshot(businessOnly), 'activityHistory'), false);
+});
+
+test('history metadata that cannot fit has a distinct recoverable failure instead of discarding business data or history', () => {
+  const state = historyBudgetFixture(20);
+  const original = JSON.stringify(state);
+  assert.throws(() => Core.validateChangeSnapshot(state), error => error.code === 'TIDY_HISTORY_FULL');
+  assert.equal(JSON.stringify(state), original);
+  const business = { ...state };
+  delete business.activityHistory;
+  const backup = Core.backupJSON(business);
+  assert.equal(Buffer.byteLength(backup), 1024 * 1024 - 20);
+  assert.equal(Core.backupJSON(Core.validateChangeSnapshot(business)), backup);
+});
+
 test('Dubai dates change at UTC 20:00 and due times use UTC+4', () => {
   assert.equal(Core.today(Date.parse('2026-10-11T19:59:59Z')), '2026-10-11');
   assert.equal(Core.today(Date.parse('2026-10-11T20:00:00Z')), '2026-10-12');
@@ -455,6 +614,7 @@ test('legacy backups keep manual meal plans absent, including at the backup size
   const state = Core.defaults();
   assert.equal(Object.hasOwn(state, 'mealPlans'), false);
   assert.equal(Object.hasOwn(state, 'menuHelper'), false);
+  assert.equal(Object.hasOwn(state, 'activityHistory'), false);
   const template = task(state, { id: 'template', notes: 'a'.repeat(8500) });
   state.tasks = Array.from({ length: 119 }, (_, index) => ({ ...template, id: 'near-' + index }));
   // Fill the remaining space with valid notes until the old backup is only
@@ -472,9 +632,12 @@ test('legacy backups keep manual meal plans absent, including at the backup size
   const restored = Core.parseBackup(backup);
   assert.equal(Object.hasOwn(restored, 'mealPlans'), false);
   assert.equal(Object.hasOwn(restored, 'menuHelper'), false);
+  assert.equal(Object.hasOwn(restored, 'activityHistory'), false);
   assert.equal(Core.backupJSON(restored), backup);
   let saved;
   Core.persist({ setItem: (_, text) => { saved = text; } }, restored);
+  assert.equal(saved, backup);
+  assert.throws(() => Core.persistIfUnchanged({ getItem: () => saved, setItem: (_, text) => { saved = text; } }, { ...restored, activityHistory: { version: 1, entries: [], olderCount: 0 } }, backup), /1 MiB/);
   assert.equal(saved, backup);
   assert.throws(() => Core.persistIfUnchanged({ getItem: () => saved, setItem: (_, text) => { saved = text; } }, { ...restored, menuHelper: MenuHelper.emptyState() }, backup), /1 MiB/);
   assert.equal(saved, backup);

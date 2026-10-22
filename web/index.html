@@ -5,15 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#265b49">
   <title>Tidy · Your day, in one place</title>
-  <link rel="stylesheet" href="styles.css?v=20261022-ask">
+  <link rel="stylesheet" href="styles.css?v=20261022-history">
   <script defer src="menu-helper.js"></script>
-  <script defer src="core.js"></script>
+  <script defer src="history.js?v=20261022-history"></script>
+  <script defer src="core.js?v=20261022-history"></script>
   <script defer src="assistant.js?v=20261022-ask"></script>
   <script defer src="calendar.js"></script>
   <script defer src="planner.js"></script>
   <script defer src="calendar-connect.js"></script>
   <script defer src="menu-ui.js?v=20261022-ask"></script>
-  <script defer src="app.js?v=20261022-ask"></script>
+  <script defer src="app.js?v=20261022-history"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -26,7 +27,7 @@
     <div class="notice-bar" id="alert-banner" role="status" hidden><div id="alert-content"></div><button class="button small secondary" id="dismiss-alert">Dismiss</button></div>
     <div class="navigation-shell">
       <nav class="app-nav" id="main-navigation" aria-label="Main navigation">
-        <button type="button" data-view="assistant" aria-current="page"><span aria-hidden="true">✳</span>Ask Tidy</button>
+        <button type="button" class="assistant-main-nav" data-view="assistant" aria-current="page"><span aria-hidden="true">✳</span>Ask Tidy</button>
         <button type="button" data-view="today"><span aria-hidden="true">☀</span>Today</button>
         <button type="button" data-view="family"><span aria-hidden="true">✓</span>Tasks</button>
         <button type="button" data-view="meals"><span aria-hidden="true">◒</span>Menu</button>
@@ -58,6 +59,7 @@
           </section>
           <section class="card assistant-overview" id="assistant-overview" aria-labelledby="assistant-overview-title"><p class="eyebrow">Already in Tidy</p><h2 id="assistant-overview-title">Your day at a glance</h2><p id="assistant-overview-summary" class="helper" role="status" aria-live="polite"></p><ul id="assistant-overview-items" class="assistant-overview-items"></ul><div class="actions left"><button type="button" class="button secondary small" id="assistant-view-today" data-go="today">Open Today</button></div><nav class="section-shortcuts" id="assistant-related" aria-label="Ask Tidy tools"><button type="button" class="button text small" id="assistant-review-requests" data-go="requests">Requests to review</button></nav></section>
         </div>
+        <section class="card assistant-history" id="assistant-history" aria-labelledby="assistant-history-title"><p class="eyebrow">Changes across Tidy</p><h2 id="assistant-history-title">Activity history</h2><p class="helper">Changes you make in Tidy appear here, including changes made in other sections. History stays on this browser and is included in backups.</p><p id="assistant-history-status" class="helper" role="status"></p><ol id="assistant-history-list" class="assistant-history-list"></ol><button type="button" class="button secondary small" id="assistant-history-more" hidden>Show more changes</button><button type="button" class="button text small" id="assistant-history-download">Download history</button></section>
         <section class="assistant-control-note" aria-label="What Tidy can do"><p class="helper">Tidy uses your saved details and simple request rules to prepare tasks, reminders and meal groceries. Purchases, bookings and messages still need your review and a separate confirmation with the provider.</p></section>
       </section>
       <section class="view" id="view-family" aria-labelledby="family-title" hidden>

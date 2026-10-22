@@ -118,7 +118,7 @@ def navigation_item_visible(tab, name):
     return item
 
 
-def navigation_grid(tab, columns, rows, all_in_viewport=False):
+def navigation_grid(tab, columns=None, rows=None, all_in_viewport=False):
     """Check the buttons themselves fit; an overflow-hidden wrapper is not enough."""
     dimensions = tab.locator("#main-navigation").evaluate("""node=>{
       const bounds=node.getBoundingClientRect(), buttons=[...node.querySelectorAll('[data-view]')];
@@ -136,6 +136,8 @@ def navigation_grid(tab, columns, rows, all_in_viewport=False):
           inViewport:b.left>=-1 && b.right<=innerWidth+1 && b.top>=-1 && b.bottom<=innerHeight+1
         }})};
     }""")
+    columns = 3 if dimensions["viewport"] <= 560 else 5
+    rows = 3 if dimensions["viewport"] <= 560 else 2
     assert dimensions["columns"] == columns, dimensions
     assert len(dimensions["rowPositions"]) == rows, dimensions
     assert dimensions["scroll"] <= dimensions["client"] + 1, dimensions
@@ -147,12 +149,17 @@ def navigation_grid(tab, columns, rows, all_in_viewport=False):
     assert all(item["fits"] and item["textFits"] for item in dimensions["buttons"]), dimensions
     assert all(item["height"] >= 44 and item["width"] >= 44 and item["fontSize"] >= 12
                for item in dimensions["buttons"]), dimensions
+    main = next(item for item in dimensions["buttons"] if item["name"] == "assistant")
+    others = [item for item in dimensions["buttons"] if item["name"] != "assistant"]
+    assert main["width"] * main["height"] > max(item["width"] * item["height"] for item in others) * 2, dimensions
+    assert main["fontSize"] > max(item["fontSize"] for item in others) * 1.3, dimensions
+    assert main["height"] > max(item["height"] for item in others), dimensions
     if all_in_viewport:
         assert all(item["inViewport"] for item in dimensions["buttons"]), dimensions
     assert tab.locator("#navigation-previous, #navigation-next, #navigation-hint").count() == 0
     return {"columns": columns, "rows": rows, "buttons": len(dimensions["buttons"]),
             "noHorizontalScrolling": True, "topNavigationInNormalFlow": True,
-            "readableTextAnd44pxTargets": True}
+            "readableTextAnd44pxTargets": True, "askTidyIsLargestByAreaAndFont": True}
 
 
 def meal(tab, kind):
@@ -315,7 +322,7 @@ def main():
             tab = page(context)
             before = state(tab)
             destination(tab, "assistant")
-            grid = navigation_grid(tab, columns=3, rows=2)
+            grid = navigation_grid(tab)
             width = tab.viewport_size["width"]
             tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
 
@@ -340,13 +347,17 @@ def main():
             destination(tab, "assistant")
             tab.locator('.app-nav [data-view="assistant"]').focus()
             tab.keyboard.press("ArrowDown")
-            assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
             destination(tab, "assistant")
+            tab.keyboard.press("ArrowDown")
+            assert tab.locator('.app-nav [data-view="shopping"]').evaluate("node=>node===document.activeElement")
+            tab.keyboard.press("ArrowUp")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowUp")
             assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowDown")
             tab.keyboard.press("Enter")
-            destination(tab, "meals")
+            destination(tab, "today")
 
             tab.locator('.app-nav [data-view="meals"]').click()
             destination(tab, "meals")
@@ -365,39 +376,39 @@ def main():
             destination(tab, "planning-settings")
             navigation_item_visible(tab, "calendar")
             assert state(tab) == before
-            navigation_grid(tab, columns=3, rows=2)
+            navigation_grid(tab)
             return {"width": width, "sixPrimarySections": len(NAV_PAGES),
                     "menuAndGroceriesAdjacent": True, "grid": grid,
                     "documentHasNoHorizontalOverflow": True,
-                    "arrowKeyFocusAndEnterActivation": True, "verticalKeyboardMatchesColumns": True,
+                    "arrowKeyFocusAndEnterActivation": True, "verticalKeyboardMatchesSpanningAskButton": True,
                     "activeDeepLinkAfterReload": True,
                     "savedDataUnchanged": True}
 
-        run("320px top navigation shows six main sections in two rows in a readable grid without sideways scrolling", phone_navigation, width=320)
-        run("390px top navigation shows six main sections in two rows in a readable grid without sideways scrolling", phone_navigation, width=390)
+        run("320px top navigation shows a larger Ask Tidy above five readable sections without sideways scrolling", phone_navigation, width=320)
+        run("390px top navigation shows a larger Ask Tidy above five readable sections without sideways scrolling", phone_navigation, width=390)
 
         def desktop_navigation(context):
             tab = page(context)
             before = state(tab)
-            grid = navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
+            grid = navigation_grid(tab, all_in_viewport=True)
             tab.locator('.app-nav [data-view="assistant"]').focus()
             tab.keyboard.press("ArrowDown")
-            assert tab.locator('.app-nav [data-view="meals"]').evaluate("node=>node===document.activeElement")
+            assert tab.locator('.app-nav [data-view="today"]').evaluate("node=>node===document.activeElement")
             destination(tab, "assistant")
             tab.keyboard.press("ArrowUp")
             assert tab.locator('.app-nav [data-view="assistant"]').evaluate("node=>node===document.activeElement")
             tab.keyboard.press("ArrowDown")
             tab.keyboard.press("Enter")
-            destination(tab, "meals")
-            assert tab.locator("#view-meals h1").evaluate("node=>node===document.activeElement")
+            destination(tab, "today")
+            assert tab.locator("#view-today h1").evaluate("node=>node===document.activeElement")
             tab.locator('.app-nav [data-view="assistant"]').click()
             tab.evaluate("scrollTo(0,0)")
-            navigation_grid(tab, columns=3, rows=2, all_in_viewport=True)
+            navigation_grid(tab, all_in_viewport=True)
             width = tab.viewport_size["width"]
             tab.screenshot(path=str(args.output / f"top-navigation-{width}.png"))
             assert state(tab) == before
             return {"width": width, "grid": grid, "allSixVisibleAtOnce": True,
-                    "verticalKeyboardMovesThreeButtons": True, "enterOpensActualFunction": True,
+                    "verticalKeyboardMatchesSpanningAskButton": True, "enterOpensActualFunction": True,
                     "savedDataUnchanged": True}
 
         run("1024px desktop shows exactly two top navigation rows and keyboard activation works", desktop_navigation, width=1024)
@@ -411,10 +422,10 @@ def main():
             before_saved = saved(tab)
             current_url = tab.url
             layouts = []
-            for width, columns, rows in [(width, 3, 2) for width in [1440, 768, 390, 320, 560, 561, 959, 960, 1024]]:
+            for width in [1440, 768, 390, 320, 560, 561, 959, 960, 1024]:
                 tab.set_viewport_size({"width": width, "height": 950})
                 tab.evaluate("scrollTo(0,0)")
-                layout = navigation_grid(tab, columns, rows)
+                layout = navigation_grid(tab)
                 layouts.append({"width": width, **layout})
                 destination(tab, "shopping")
                 assert tab.url == current_url
@@ -422,7 +433,7 @@ def main():
                 assert saved(tab) == before_saved
                 tab.locator('.app-nav [data-view="assistant"]').focus()
                 tab.keyboard.press("ArrowDown")
-                target = NAV_PAGES[columns]
+                target = "today"
                 assert tab.locator(f'.app-nav [data-view="{target}"]').evaluate("node=>node===document.activeElement")
                 destination(tab, "shopping")
             assert tab.locator("#shopping-tasks").inner_text().find("Resize check bread") >= 0
@@ -885,8 +896,10 @@ def main():
             submit_plan(tab, "breakfast")
             assert not tab.locator("#breakfast-error").is_visible()
             assert saved(tab)["mealPlans"]["breakfast"]["Monday"] == "Toast"
-            assert {key: value for key, value in saved(tab).items() if key != "mealPlans"} == {
-                key: value for key, value in before.items() if key != "mealPlans"}
+            assert {key: value for key, value in saved(tab).items() if key not in {"mealPlans", "activityHistory"}} == {
+                key: value for key, value in before.items() if key not in {"mealPlans", "activityHistory"}}
+            history = saved(tab)["activityHistory"]["entries"]
+            assert any("breakfast" in event["title"].lower() for event in history)
             assert not tab.locator("#storage-warning").is_visible()
             assert tab.locator("#save-status").inner_text() == "Saved on this browser"
             assert "plan saved" in tab.locator("#breakfast-status").inner_text().lower()
