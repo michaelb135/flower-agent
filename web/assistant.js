@@ -623,7 +623,96 @@
     return { kind: 'meal', request, reply: 'I’ll prepare an editable ingredient draft for you to review. No order will be placed.' };
   }
 
-  const api = Object.freeze({ parse, planClarification, resolveClarification, routeRequest });
+  function workflowBlocked(message) {
+    return { kind: 'meal-workflow', request: '', addGroceries: false, reminder: null, blocked: true,
+      message, reply: message + ' Nothing has been changed.' };
+  }
+
+  // Only this small, explicit meal flow is decomposed. General conjunctions
+  // stay with the existing parser, rather than silently dropping another job.
+  function planMealRequest(input, options) {
+    if (typeof input !== 'string' || !input.trim()) return null;
+    const raw = input.normalize('NFKC').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
+    const mealHint = /\b(?:(?:we|i)(?:'re|'m| are| am| will be)? having|(?:we|i) (?:want|would like) to eat)\b/i.test(raw)
+      || /\b(?:make|cook|prepare)\b[\s\S]*\bfor (?:breakfast|lunch|dinner)\b/i.test(raw);
+    const actionHint = /\b(?:ingredients|remind|notify|buy|order|purchase|send|book|reserve|message|email)\b/i.test(raw);
+    if (!mealHint || !actionHint) return null;
+    const unsafe = 'I can prepare a meal, add its ingredients to your local list and set a cooking reminder. Please ask for purchases, bookings, messages or other jobs separately.';
+    if (raw.length > 1000 || /[\u0000-\u001f\u007f<>]|https?:\/\/|javascript:|data:/i.test(raw)) return workflowBlocked('Please use one short meal request without links or markup.');
+    if (/\b(?:buy|order|purchase|pay|checkout|book|reserve|send|message|email|contact|connect|access|read|fetch|scan|sync|delete|cancel|remove|ignore)\b/i.test(raw)
+      || /\b(?:don't|do not|never|not now|skip|instead of)\b/i.test(raw)) return workflowBlocked(unsafe);
+    const now = clarificationNow(options);
+    if (now === null) return workflowBlocked('The current time is unavailable. Please try again.');
+    const text = raw.replace(/\bat(?=\d)/gi, 'at ');
+    const boundary = /\s*(?:[,.!?;]\s*|\s+(?:and(?:\s+then)?|then)\s+)(?=(?:please\s+)?(?:add|put|remind|notify|buy|order|purchase|book|reserve|send|message|email|call|clean|pack|check|delete|cancel)\b)/i;
+    const parts = text.split(boundary).map(value => value.replace(/^[\s,.;!?]+|[\s,.;!?]+$/g, '').replace(/^please\s+/i, '').trim());
+    if (parts.length < 2 || parts.length > 3) return workflowBlocked('Please name the meal, then say “add the ingredients” and optionally “remind me to cook at 6 pm”.');
+    const mealWhen = temporal(parts[0], today(now));
+    if (mealWhen.problems.length || mealWhen.clockRequested || mealWhen.repeat !== 'none' || UNSUPPORTED_TIMING_CUE.test(parts[0])) return workflowBlocked('Please give one meal day and put an exact Dubai time in the cooking reminder.');
+    const meal = mealWhen.title.match(/^(?:we|i)(?:'re|'m| are| am| will be)? having\s+(.+)$/i)
+      || mealWhen.title.match(/^(?:we|i) (?:want|would like) to eat\s+(.+)$/i)
+      || mealWhen.title.match(/^(?:make|cook|prepare)(?: me| us)?\s+(.+?)\s+for (?:breakfast|lunch|dinner)$/i);
+    if (!meal) return workflowBlocked('Please start with the dish, such as “We’re having tomato pasta”.');
+    const request = meal[1].replace(/\s+for (?:breakfast|lunch|dinner)$/i, '').trim();
+    const dietary = request.replace(/\b(?:no|without|avoid|exclude|excluding) beans?\b/gi, '');
+    if (!request || /\b(?:add|put|remind|notify|make|cook|prepare|plan|organise|organize|set|have|need|want|start|stop)\b/i.test(request)
+      || /\b(?:no|without|avoid|exclude|excluding|allerg\w*|intoleran\w*|coeliac|celiac|gluten|dairy|vegan|vegetarian|keto|halal|kosher|lactose|diabetic|nut[ -]?free|low[ -]?(?:carb|sodium|salt|sugar))\b/i.test(dietary)) return workflowBlocked('Please review dietary restrictions or additional instructions in Menu before preparing this meal.');
+    let addGroceries = false, reminderText = null;
+    for (const part of parts.slice(1)) {
+      if (/^(?:add|put)\s+(?:(?:the|its|these|those|all the)\s+)?ingredients(?:\s+(?:for (?:it|this|that|the meal)|we need))?(?:\s+(?:to|in|on)\s+(?:(?:my|our|the)\s+)?(?:groceries|grocery list|shopping list))?$/i.test(part)
+        || /^add what we need(?: to (?:(?:my|our|the) )?(?:groceries|grocery list|shopping list))?$/i.test(part)) {
+        if (addGroceries) return workflowBlocked('Please ask once to add the ingredients.');
+        addGroceries = true;
+      } else if (/^(?:remind|notify)\s+(?:me|us)\b/i.test(part) && !reminderText) reminderText = part;
+      else return workflowBlocked(unsafe);
+    }
+    let reminder = null;
+    if (reminderText) {
+      const body = reminderText.replace(/^(?:remind|notify)\s+(?:me|us)(?:\s+to)?\s*/i, '');
+      const when = temporal(body, today(now));
+      const allowed = new RegExp('^(?:cook|start(?: cooking)?|make|prepare)(?: (?:(?:the|our|my) )?(?:meal|dinner|lunch|breakfast|it|this|that|' + escapeRE(request) + '))?$', 'i');
+      if (!allowed.test(when.title)) return workflowBlocked('For this meal, ask me to remind you to cook or start cooking. Ask for other reminders separately.');
+      if (UNSUPPORTED_TIMING_CUE.test(body) || when.repeat !== 'none') return workflowBlocked('Please choose an exact Dubai date and time for this meal’s cooking reminder.');
+      // A cooking reminder needs the requested clock. General family planning
+      // must not turn its missing time into an unscheduled task result.
+      reminder = parse(reminderText + (mealWhen.dueDate && !when.dueDate ? ' on ' + mealWhen.dueDate : ''), { ...(options || {}), planningEnabled: false, efficientMode: true });
+      if (reminder.draft) reminder.draft.title = 'Cook ' + request.replace(/\s+for\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+(?:people|persons?|servings?))?$/i, '');
+      if (mealWhen.dueDate && when.dueDate && mealWhen.dueDate !== when.dueDate) {
+        reminder = { kind: 'clarify', draft: { ...baseDraft(), title: reminder.draft?.title || 'Cook ' + request, dueTime: when.dueTime }, missing: ['dueDate', ...(!when.dueTime ? ['dueTime'] : [])], reminderRequested: true,
+          clarificationContext: { safe: true, ambiguousHour: when.ambiguousHour, clockRequested: when.clockRequested, autoPlanEligible: false },
+          message: 'The meal and reminder have different days. Which single day should I use for the cooking reminder? Nothing has been changed.' };
+      }
+      if (reminder.kind !== 'task' && reminder.kind !== 'clarify') return workflowBlocked(unsafe);
+    }
+    return { kind: 'meal-workflow', request, addGroceries, reminder,
+      reply: 'I’ll prepare the meal ingredients' + (addGroceries ? ', add them to your local grocery list' : '') + (reminder ? ' and set your cooking reminder' : '') + '. No order will be placed.' };
+  }
+
+  function parseReminderCorrection(input, target, options) {
+    if (typeof input !== 'string' || !input.trim()) return null;
+    const text = input.normalize('NFKC').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '').trim();
+    const match = text.match(/^(?:(?:actually|sorry|no)\s*[,;:]?\s*)?(?:make\s+(?:it|that)(?:\s+to)?|(?:change|move|reschedule|set)\s+(?:it|that|(?:the|my)\s+reminder)(?:\s+to)?|(?:change|move|reschedule)\s+(?:the|my)\s+time\s+to)\s*(.+)$/i);
+    if (!match) return null;
+    const problem = message => ({ kind: 'reminder-correction', result: clarify(message, undefined, ['intent']) });
+    if (text.length > 1000 || /[\u0000-\u001f\u007f<>]|https?:\/\/|javascript:|data:/i.test(text)) return problem('Please give just the new date or time for your reminder.');
+    if (!target || typeof target !== 'object' || typeof target.title !== 'string' || !target.title.trim() || !validDate(target.dueDate || '') || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(target.dueTime || '')) return problem('Which reminder do you want to change? Open or ask for a reminder first, then give me its new date or time.');
+    const now = clarificationNow(options);
+    if (now === null) return problem('The current time is unavailable. Please try again.');
+    const replacement = match[1].replace(/\bat(?=\d)/gi, 'at ').replace(/^(\d{1,2})$/, 'at $1'), when = temporal(replacement, today(now));
+    if (/\b(?:don't|do not|not|never|cancel|delete|remove|buy|order|purchase|pay|book|send|message|email|and|then)\b/i.test(replacement)
+      || when.title || !when.dueDate && !when.clockRequested && !when.problems.length) return problem('Please give just the new reminder date or time, such as “make it tomorrow at 6:30 pm”.');
+    if (UNSUPPORTED_TIMING_CUE.test(replacement) || when.repeat !== 'none') return problem('Please choose an exact Dubai date and time; I cannot apply relative times or a new repeat pattern here.');
+    const schedule = replacement + (!when.dueDate ? ' on ' + target.dueDate : '') + (!when.clockRequested ? ' at ' + target.dueTime : '');
+    const result = parse('Remind me to update this reminder ' + schedule, { ...(options || {}), efficientMode: true });
+    if (result.draft) {
+      const kept = {};
+      for (const field of ['title', 'category', 'assigneeId', 'priority', 'type', 'quantity', 'notes', 'link', 'repeat']) if (target[field] !== undefined) kept[field] = target[field];
+      result.draft = { ...result.draft, ...kept };
+    }
+    return { kind: 'reminder-correction', result };
+  }
+
+  const api = Object.freeze({ parse, planClarification, resolveClarification, routeRequest, planMealRequest, parseReminderCorrection });
   root.TidyAssistant = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

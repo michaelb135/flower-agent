@@ -9,12 +9,13 @@
   <script defer src="menu-helper.js"></script>
   <script defer src="history.js?v=20261022-history"></script>
   <script defer src="core.js?v=20261022-history"></script>
-  <script defer src="assistant.js?v=20261022-ask"></script>
+  <script defer src="assistant.js?v=20261026-connected"></script>
+  <script defer src="assistant-workflow.js?v=20261026-connected"></script>
   <script defer src="calendar.js"></script>
   <script defer src="planner.js"></script>
   <script defer src="calendar-connect.js"></script>
-  <script defer src="menu-ui.js?v=20261022-ask"></script>
-  <script defer src="app.js?v=20261022-history"></script>
+  <script defer src="menu-ui.js?v=20261026-connected"></script>
+  <script defer src="app.js?v=20261026-connected"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -41,6 +42,7 @@
         <p id="assistant-activity-reply" class="assistant-reply"></p>
         <ol id="assistant-activity-steps" class="activity-steps"></ol>
         <p id="assistant-activity-message" class="helper"></p>
+        <div id="assistant-activity-results" class="actions left"></div>
         <div class="assistant-activity-actions"><button type="button" class="button secondary small" id="assistant-activity-open" hidden>Show me</button><button type="button" class="button secondary small" id="assistant-activity-edit" hidden>Edit details</button><button type="button" class="button secondary small" id="assistant-activity-undo" hidden>Undo</button><button type="button" class="button text small" id="assistant-activity-dismiss">Dismiss</button></div>
       </section>
       <section class="view" id="view-today" aria-labelledby="today-title" hidden>

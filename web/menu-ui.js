@@ -26,6 +26,7 @@
     let notice = '';
     let assumptions = [];
     let pending = null;
+    let assistantPreparation = null;
 
     function current(state) { return H.validateState(state.menuHelper || H.emptyState()); }
     function error(message) {
@@ -44,10 +45,16 @@
       if (item.store) parts.push(item.store);
       return parts.join(' · ');
     }
-    function approvedItems() {
+    function approvedDraft() {
       const menu = current(options.getState());
-      if (reviewDirty || conflict || (loaded && !same(menu, loaded)) || !menu.draft || menu.draft.status !== 'approved') return [];
-      return clone(menu.draft.items.filter(item => item.included));
+      if (reviewDirty || conflict || (loaded && !same(menu, loaded)) || !menu.draft || menu.draft.status !== 'approved') return null;
+      return menu.draft;
+    }
+    function approvedItems() {
+      const draft = approvedDraft();
+      if (!draft) return [];
+      const items = clone(draft.items.filter(item => item.included));
+      return typeof options.visibleMealItems === 'function' ? clone(options.visibleMealItems(options.getState(), items)) : items;
     }
     function shoppingText() {
       const items = approvedItems();
@@ -79,7 +86,9 @@
       const items = approvedItems();
       fields.shoppingItems.replaceChildren();
       if (!items.length) {
-        fields.shoppingStatus.textContent = 'This meal is still a draft. Review and confirm its groceries in Menu before shopping.';
+        fields.shoppingStatus.textContent = approvedDraft()
+          ? 'These ingredients are already in your grocery list. No order has been placed.' + (options.getSaved() ? '' : ' This change is not saved; download a backup before closing Tidy.')
+          : 'This meal is still a draft. Review and confirm its groceries in Menu before shopping.';
       } else {
         fields.shoppingStatus.textContent = 'Shopping draft confirmed for ' + draft.people + (draft.people === 1 ? ' person' : ' people') + '. No order has been placed.' + (options.getSaved() ? '' : ' This change is not saved; download a backup before closing Tidy.');
         items.forEach(item => {
@@ -102,6 +111,7 @@
       byId('quick-menu-waitrose').hidden = !items.length;
     }
     function markReviewDirty() {
+      cancelAssistantPreparation('You edited the meal ingredients instead of continuing that request.');
       reviewDirty = true;
       notice = 'You have changes to review. Your revised list needs confirmation before shopping.';
       refreshMessages();
@@ -184,7 +194,7 @@
       fields.remember.checked = false;
       refreshMessages(); renderShopping();
     }
-    function commit(work, message) {
+    function commit(work, message, stateWork) {
       const baseline = clone(loaded || current(options.getState()));
       let failure = '';
       committing = true;
@@ -193,6 +203,7 @@
           const latest = current(state);
           if (!same(latest, baseline)) throw new Error('This meal changed in another tab. Load the saved draft before trying again.');
           state.menuHelper = H.validateState(work(clone(latest)));
+          if (stateWork) stateWork(state, state.menuHelper.draft);
         } catch (problem) { failure = problem.message; throw problem; }
       }, message);
       committing = false;
@@ -232,23 +243,48 @@
       fields.remember.checked = remember;
       return true;
     }
-    function acceptPrepared(result) {
+    function cancelAssistantPreparation(reason = 'The meal request was cancelled.') {
+      const preparation = assistantPreparation;
+      if (!preparation) return false;
+      assistantPreparation = null;
+      if (pending && pending.preparation === preparation) {
+        pending = null;
+        byId('quick-menu-replacement').hidden = true;
+      }
+      fields.choices.replaceChildren();
+      fields.choices.hidden = true;
+      if (options.onPreparationCancelled) options.onPreparationCancelled(preparation.context, reason);
+      return true;
+    }
+    function preparationFailure(preparation, message) {
+      if (preparation && options.onPreparationFailed) options.onPreparationFailed(preparation.context, message);
+      return { status: 'error', message };
+    }
+    function acceptPrepared(result, preparation = null) {
+      if (preparation && preparation !== assistantPreparation) return { status: 'cancelled', message: 'That meal request is no longer active.' };
+      if (preparation && typeof options.applyPrepared !== 'function') return preparationFailure(preparation, 'The related meal actions are unavailable. Nothing new was changed.');
       assumptions = result.assumptions || [];
       notice = 'I’ve filled in the ingredients for ' + result.draft.name.toLowerCase() + '. Review the list, then confirm it. No order has been placed.';
       const oldDirty = requestDirty;
       requestDirty = false;
-      if (commit(menu => ({ ...menu, people: result.draft.people, draft: result.draft }), 'Meal ingredients prepared for review.')) {
+      let outcome;
+      if (commit(menu => ({ ...menu, people: result.draft.people, draft: result.draft }), 'Meal ingredients prepared for review.', preparation ? (state, draft) => {
+        outcome = options.applyPrepared(state, clone(draft), preparation.context);
+      } : null)) {
         fields.title.focus();
         byId('quick-menu-replacement').hidden = true;
         pending = null;
-        const prepared = { status: 'prepared', name: result.draft.name, draftId: result.draft.id, saved: options.getSaved() };
+        if (preparation) assistantPreparation = null;
+        const prepared = { status: 'prepared', name: result.draft.name, draftId: result.draft.id, saved: options.getSaved(), ...(preparation ? { context: preparation.context, outcome } : {}) };
         if (options.onPrepared) options.onPrepared(prepared);
         return prepared;
       }
       requestDirty = oldDirty;
-      return { status: 'error', message: fields.error.textContent };
+      return preparationFailure(preparation, fields.error.textContent);
     }
-    function prepare(recipeId, recipeName) {
+    function prepare(recipeId, recipeName, preparation = null) {
+      if (preparation && preparation !== assistantPreparation) return { status: 'cancelled', message: 'That meal request is no longer active.' };
+      if (!preparation) cancelAssistantPreparation('You started a different meal request.');
       error('');
       pending = null;
       byId('quick-menu-replacement').hidden = true;
@@ -258,7 +294,7 @@
           people: Number(fields.people.value), preferences: (loaded || current(options.getState())).preferences,
           ...(recipeId ? { recipeId } : {})
         });
-      } catch (problem) { error(problem.message); return { status: 'error', message: problem.message }; }
+      } catch (problem) { error(problem.message); return preparationFailure(preparation, problem.message); }
       fields.choices.replaceChildren();
       fields.choices.hidden = result.ok;
       if (!result.ok) {
@@ -270,22 +306,22 @@
         result.choices.forEach(choice => {
           const button = element('button', 'button secondary small', choice.name);
           button.type = 'button';
-          button.addEventListener('click', () => prepare(choice.id, [choice.name, explicitShape, explicitPeople].filter(Boolean).join(' ')));
+          button.addEventListener('click', () => prepare(choice.id, [choice.name, explicitShape, explicitPeople].filter(Boolean).join(' '), preparation));
           fields.choices.append(button);
         });
         refreshMessages(); return { status: 'choices', message: result.reason };
       }
       if (loaded && loaded.draft) {
-        pending = { result, baseline: clone(loaded) };
-        byId('quick-menu-replacement-message').textContent = 'Replace your current ' + loaded.draft.name.toLowerCase() + ' draft with ' + result.draft.name.toLowerCase() + '? The current meal list will be removed from Groceries. You can view and download it first.';
+        pending = { result, baseline: clone(loaded), preparation };
+        byId('quick-menu-replacement-message').textContent = 'Replace your current ' + loaded.draft.name.toLowerCase() + ' draft with ' + result.draft.name.toLowerCase() + '? Ingredients under the current meal will change. Items already added separately in Groceries will stay. You can view and download the current list first.';
         byId('quick-menu-replacement').hidden = false;
         byId('quick-menu-replace').focus();
         return { status: 'replacement', name: result.draft.name };
       }
-      return acceptPrepared(result);
+      return acceptPrepared(result, preparation);
     }
 
-    function prepareFromAssistant(request) {
+    function prepareFromAssistant(request, context = null) {
       if (typeof request !== 'string' || !request.trim() || request.length > 1000) return { status: 'error', message: 'Name a simple dish to prepare its groceries.' };
       render();
       if (reviewDirty || conflict || pending || requestDirty && fields.request.value.trim() && fields.request.value.trim() !== request.trim()) {
@@ -293,14 +329,17 @@
         error(message);
         return { status: 'blocked', message };
       }
+      cancelAssistantPreparation('You started a different assistant request.');
+      const preparation = context === null ? null : { context };
+      assistantPreparation = preparation;
       fields.request.value = request.trim();
       requestDirty = true;
-      return prepare();
+      return prepare(undefined, undefined, preparation);
     }
 
     fields.form.addEventListener('submit', event => { event.preventDefault(); prepare(); });
-    fields.request.addEventListener('input', () => { requestDirty = true; });
-    fields.people.addEventListener('input', () => { if (loaded && loaded.draft && fields.request.value === loaded.draft.request) markReviewDirty(); });
+    fields.request.addEventListener('input', () => { cancelAssistantPreparation('You edited the meal request.'); requestDirty = true; });
+    fields.people.addEventListener('input', () => { cancelAssistantPreparation('You edited the number of people.'); if (loaded && loaded.draft && fields.request.value === loaded.draft.request) markReviewDirty(); });
     fields.people.addEventListener('change', () => {
       if (!loaded || !loaded.draft || fields.request.value !== loaded.draft.request) return;
       let draft;
@@ -317,6 +356,7 @@
     doc.querySelectorAll('[data-quick-meal]').forEach(button => button.addEventListener('click', () => prepare(undefined, button.dataset.quickMeal)));
     fields.reviewForm.addEventListener('submit', event => {
       event.preventDefault();
+      cancelAssistantPreparation('You confirmed the current meal instead of continuing that request.');
       if (!loaded || !loaded.draft) return;
       let draft;
       try {
@@ -335,22 +375,28 @@
     fields.continue.addEventListener('click', () => options.showView('shopping'));
     byId('quick-menu-replace').addEventListener('click', () => {
       if (!pending) return;
-      if (!same(pending.baseline, loaded)) { error('The current meal changed. Prepare the new dish again before replacing it.'); return; }
-      acceptPrepared(pending.result);
+      if (!same(pending.baseline, loaded)) {
+        const message = 'The current meal changed. Prepare the new dish again before replacing it.';
+        error(message); preparationFailure(pending.preparation, message); return;
+      }
+      acceptPrepared(pending.result, pending.preparation);
     });
     byId('quick-menu-keep').addEventListener('click', () => {
+      cancelAssistantPreparation('Your current meal was kept; the other requested actions were not started.');
       pending = null; byId('quick-menu-replacement').hidden = true;
       if (loaded && loaded.draft) { fields.request.value = loaded.draft.request; fields.people.value = loaded.draft.people; requestDirty = false; }
       notice = 'Your current meal and groceries were kept.'; refreshMessages();
     });
     byId('quick-menu-view-current').addEventListener('click', () => options.showView('shopping'));
     fields.reload.addEventListener('click', () => {
+      cancelAssistantPreparation('You loaded the saved meal instead of continuing that request.');
       reviewDirty = false; requestDirty = false; conflict = false; loaded = null; assumptions = [];
       pending = null; byId('quick-menu-replacement').hidden = true;
       notice = 'Showing the latest saved meal draft.'; error(''); render();
       if (options.onChanged) options.onChanged();
     });
     fields.forget.addEventListener('click', () => {
+      cancelAssistantPreparation('You changed the saved product choices instead of continuing that request.');
       notice = 'Saved product choices removed. Existing draft choices remain editable.';
       commit(menu => ({ ...menu, preferences: [], draft: menu.draft ? { ...menu.draft, items: menu.draft.items.map(item => ({ ...item, source: '' })) } : null }), 'Saved product choices forgotten.');
     });
@@ -358,7 +404,7 @@
     byId('quick-menu-kibsons').addEventListener('click', () => options.openWebsite('https://www.kibsons.com/', 'Kibsons'));
     byId('quick-menu-waitrose').addEventListener('click', () => options.openWebsite('https://www.waitrose.ae/', 'Waitrose UAE'));
 
-    return { render, getApprovedItems: approvedItems, shoppingText, prepareFromAssistant };
+    return { render, getApprovedItems: approvedItems, shoppingText, prepareFromAssistant, cancelAssistantPreparation };
   }
 
   root.TidyQuickMenuUI = Object.freeze({ create });

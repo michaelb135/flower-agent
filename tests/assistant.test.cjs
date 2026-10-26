@@ -4,6 +4,185 @@ const assert = require('node:assert/strict');
 const assistant = require('../web/assistant.js');
 const now = Date.parse('2026-10-12T08:00:00Z'); // Monday, noon in Dubai.
 const parse = (text, extra = {}) => assistant.parse(text, { now, members: [{ id: 'dad', name: 'Dad' }, { id: 'mum', name: 'Mum' }], ...extra });
+const mealFlow = (text, extra = {}) => assistant.planMealRequest(text, { now, efficientMode: true, ...extra });
+const reminderTarget = { id: 'cooking-reminder', title: 'Cook tomato pasta', category: 'Home', assigneeId: 'mum', dueDate: '2026-10-13', dueTime: '18:00', remindAt: Date.parse('2026-10-13T18:00:00+04:00'), priority: 'high', type: 'task', quantity: '', notes: 'Keep my note', link: '', repeat: 'none' };
+const correction = (text, target = reminderTarget, extra = {}) => assistant.parseReminderCorrection(text, target, { now, efficientMode: true, ...extra });
+
+test('one explicit meal request plans groceries and a real cooking reminder without an external action', () => {
+  const result = mealFlow('Tomorrow we’re having tomato pasta. Add the ingredients and remind me to cook at 6 pm.');
+  assert.equal(result.kind, 'meal-workflow');
+  assert.equal(result.request, 'tomato pasta');
+  assert.equal(result.addGroceries, true);
+  assert.equal(result.reminder.kind, 'task');
+  assert.equal(result.reminder.draft.title, 'Cook tomato pasta');
+  assert.equal(result.reminder.draft.dueDate, '2026-10-13');
+  assert.equal(result.reminder.draft.dueTime, '18:00');
+  assert.equal(result.reminder.draft.remindAt, Date.parse('2026-10-13T18:00:00+04:00'));
+  assert.equal(result.reminder.reminderRequested, true);
+  assert.equal(result.action, undefined);
+  assert.match(result.reply, /No order will be placed/);
+});
+
+test('meal workflow accepts explicit variants and preserves dish conjunctions and servings', () => {
+  for (const text of [
+    "We're having chicken and rice tomorrow and add ingredients and remind me to cook at6pm",
+    'I want to eat chicken and rice for 3 people tomorrow. Remind me to start cooking at 18:00 and add its ingredients to my shopping list',
+    'Prepare chicken and rice for dinner tomorrow; put the ingredients in our groceries; remind us to cook at 6 pm',
+    "Tomorrow we're having chicken and rice, add the ingredients, remind me to cook at 6 pm",
+    "We're having chicken and rice tomorrow and then add ingredients and then remind me to cook at 6 pm"
+  ]) {
+    const result = mealFlow(text);
+    assert.equal(result.kind, 'meal-workflow', text);
+    assert.equal(result.blocked, undefined, text);
+    assert.match(result.request, /^chicken and rice/);
+    assert.equal(result.addGroceries, true, text);
+    assert.equal(result.reminder.kind, 'task', text);
+    assert.equal(result.reminder.draft.dueDate, '2026-10-13', text);
+    assert.equal(result.reminder.draft.dueTime, '18:00', text);
+  }
+  const servings = mealFlow('We are having tomato pasta for 3 people tomorrow. Add ingredients and remind me to cook at 6 pm');
+  assert.equal(servings.request, 'tomato pasta for 3 people');
+  assert.equal(servings.reminder.draft.title, 'Cook tomato pasta');
+  assert.equal(mealFlow("We're having tomato pasta tomorrow. Add ingredients").reminder, null);
+  assert.equal(mealFlow("We're having tomato pasta tomorrow. Remind me to cook at 6 pm").addGroceries, false);
+});
+
+test('meal workflow keeps clock ambiguity to one compact question and refuses conflicting days', () => {
+  const result = mealFlow('Tomorrow we’re having tomato pasta. Add the ingredients and remind me to cook at 6 o’clock');
+  assert.equal(result.reminder.kind, 'clarify');
+  assert.equal(result.reminder.draft.dueDate, '2026-10-13');
+  assert.equal(result.reminder.draft.remindAt, null);
+  const plan = assistant.planClarification(result.reminder, { now, efficientMode: true });
+  assert.equal(plan.advanced, false);
+  assert.deepEqual(plan.choices.map(choice => choice.patch.dueTime), ['06:00', '18:00']);
+  const resolved = assistant.resolveClarification(result.reminder, { dueTime: '18:00' }, { now, efficientMode: true });
+  assert.equal(resolved.kind, 'task');
+  assert.equal(resolved.draft.dueDate, '2026-10-13');
+  assert.equal(resolved.draft.dueTime, '18:00');
+  const conflict = mealFlow("We're having tomato pasta tomorrow. Add ingredients and remind me to cook today at 6 pm");
+  assert.equal(conflict.reminder.kind, 'clarify');
+  assert.equal(conflict.reminder.draft.dueDate, '');
+  assert.equal(conflict.reminder.draft.remindAt, null);
+  assert.match(conflict.reminder.message, /different days/);
+  const both = mealFlow("We're having tomato pasta tomorrow. Remind me to cook today at 6 o’clock");
+  assert.equal(both.reminder.kind, 'clarify');
+  assert.deepEqual(both.reminder.missing, ['dueDate', 'dueTime']);
+});
+
+test('meal workflow rejects past or invalid reminders without inventing a successful schedule', () => {
+  for (const text of [
+    "We're having tomato pasta today. Add ingredients and remind me to cook at 7 am",
+    "We're having tomato pasta tomorrow. Add ingredients and remind me to cook at 25:00"
+  ]) {
+    const result = mealFlow(text);
+    assert.equal(result.reminder.kind, 'clarify', text);
+    assert.equal(result.reminder.draft.remindAt, null, text);
+  }
+});
+
+test('confirmed planning does not bypass the missing clock in a cooking workflow', () => {
+  const result = mealFlow("Tomorrow we're having tomato pasta. Add the ingredients and remind me to cook", { planningEnabled: true });
+  assert.equal(result.reminder.kind, 'clarify');
+  assert.deepEqual(result.reminder.missing, ['dueTime']);
+  assert.equal(result.reminder.draft.dueDate, '2026-10-13');
+  assert.equal(result.reminder.draft.remindAt, null);
+  assert.equal(result.reminder.autoPlanRequested, undefined);
+  const plan = assistant.planClarification(result.reminder, { now, planningEnabled: true, efficientMode: true });
+  assert.equal(plan.advanced, false);
+  const resolved = assistant.resolveClarification(result.reminder, { dueTime: '18:30' }, { now, planningEnabled: true, efficientMode: true });
+  assert.equal(resolved.kind, 'task');
+  assert.equal(resolved.draft.dueDate, '2026-10-13');
+  assert.equal(resolved.draft.dueTime, '18:30');
+  assert.equal(resolved.draft.remindAt, Date.parse('2026-10-13T18:30:00+04:00'));
+});
+
+test('meal workflow never absorbs purchases, unrelated jobs, unsafe input or unchecked diet instructions', () => {
+  for (const text of [
+    "We're having tomato pasta. Add ingredients and order them from Waitrose",
+    "We're having tomato pasta. Buy ingredients and remind me to cook at 6 pm",
+    "We're having tomato pasta. Add ingredients and send a message to Mum",
+    "We're having tomato pasta. Add ingredients and book a table",
+    "We're having tomato pasta. Add ingredients and clean the kitchen",
+    "We're having tomato pasta. Remind me to cook and pack my bag at 6 pm",
+    "We're having tomato pasta. Remind me to cook at 25:00 and pack my bag",
+    "We're having tomato pasta. Add ingredients and don't remind me",
+    "We're having tomato pasta without dairy. Add ingredients",
+    "We're having tomato pasta tomorrow. Remind me to cook after work",
+    "We're having tomato pasta tomorrow. Remind me to cook around 6 pm",
+    "We're having tomato pasta. Add ingredients from https://example.com/",
+    "We're having <img src=x> tomato pasta. Add ingredients"
+  ]) {
+    const result = mealFlow(text);
+    assert.equal(result.kind, 'meal-workflow', text);
+    assert.equal(result.blocked, true, text);
+    assert.equal(result.request, '', text);
+    assert.equal(result.reminder, null, text);
+    assert.equal(result.addGroceries, false, text);
+  }
+  assert.equal(mealFlow("We're having tomato pasta with no beans. Add ingredients").blocked, undefined);
+});
+
+test('unrelated and established single-intent requests stay with their existing routes', () => {
+  for (const text of ['We need tomato pasta', 'Add milk to the shopping list', 'Remind me to cook tomorrow at 6 pm', 'I want to eat tomato pasta', 'Show my groceries', 'Get groceries at 7 pm', 'Make the work report tomorrow and add a reminder', 'Actually make it 6 pm']) {
+    assert.equal(mealFlow(text), null, text);
+  }
+});
+
+test('short corrections update the existing reminder date or clock while preserving its other fields', () => {
+  for (const text of ['Actually, make it 6:30 pm', 'make it6:30pm', 'Change that to 18:30', 'Move it to 6:30 pm']) {
+    const result = correction(text);
+    assert.equal(result.kind, 'reminder-correction', text);
+    assert.equal(result.result.kind, 'task', text);
+    assert.equal(result.result.draft.dueDate, reminderTarget.dueDate, text);
+    assert.equal(result.result.draft.dueTime, '18:30', text);
+    assert.equal(result.result.draft.remindAt, Date.parse('2026-10-13T18:30:00+04:00'), text);
+    for (const field of ['title', 'category', 'assigneeId', 'priority', 'notes']) assert.equal(result.result.draft[field], reminderTarget[field], field);
+  }
+  const day = correction('Change that to Wednesday');
+  assert.equal(day.result.draft.dueDate, '2026-10-14');
+  assert.equal(day.result.draft.dueTime, '18:00');
+  const both = correction('Change that to tomorrow at7pm', { ...reminderTarget, dueDate: '2026-10-14' });
+  assert.equal(both.result.draft.dueDate, '2026-10-13');
+  assert.equal(both.result.draft.dueTime, '19:00');
+  assert.deepEqual(reminderTarget.notes, 'Keep my note');
+});
+
+test('correction ambiguity and past clocks clarify without rolling the saved day forward', () => {
+  const ambiguous = correction('Make it 6 o’clock');
+  assert.equal(ambiguous.result.kind, 'clarify');
+  assert.equal(ambiguous.result.draft.dueDate, reminderTarget.dueDate);
+  assert.equal(ambiguous.result.draft.remindAt, null);
+  assert.equal(assistant.planClarification(ambiguous.result, { now, efficientMode: true }).advanced, false);
+  assert.equal(assistant.planClarification(correction('Actually make it6').result, { now, efficientMode: true }).advanced, false);
+  const past = correction('Actually, make it 7 am', { ...reminderTarget, dueDate: '2026-10-12' });
+  assert.equal(past.result.kind, 'clarify');
+  assert.equal(past.result.draft.remindAt, null);
+  assert.match(past.result.message, /already passed/);
+  const invalid = correction('Make it 25:00');
+  assert.equal(invalid.result.kind, 'clarify');
+  assert.equal(invalid.result.draft.remindAt, null);
+});
+
+test('corrections with no context or extra actions never become a new saved task', () => {
+  for (const [text, target] of [
+    ['Actually make it 6:30 pm', null],
+    ['Change that to tomorrow at 6 pm', {}],
+    ['Make it 7 pm and order groceries', reminderTarget],
+    ['Make it 7 pm and call Mum', reminderTarget],
+    ['Make it 25:00 and pack my bag', reminderTarget],
+    ['Move it to after work', reminderTarget],
+    ['Move it to every day at 6 pm', reminderTarget],
+    ['Make it <b>6 pm</b>', reminderTarget],
+    ['Make it https://example.com/', reminderTarget],
+    ['Make it not 6 pm', reminderTarget]
+  ]) {
+    const result = correction(text, target);
+    assert.equal(result.kind, 'reminder-correction', text);
+    assert.equal(result.result.kind, 'clarify', text);
+    assert.equal(result.result.draft, undefined, text);
+  }
+  for (const text of ['Remind me to call Mum at 6 pm', 'I want to eat pasta', 'buy milk', 'make tomato pasta for dinner']) assert.equal(correction(text), null, text);
+});
 
 test('grocery capture is an editable local item, never a purchase', () => {
   const result = parse('We need ketchup');
